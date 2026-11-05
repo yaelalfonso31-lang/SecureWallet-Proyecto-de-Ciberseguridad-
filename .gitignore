@@ -1,0 +1,33 @@
+# ===== Secretos y llaves (NUNCA subir) =====
+.env
+*.env
+!.env.example
+*.pem
+*.key
+*.jks
+*.keystore
+key.properties
+secrets/
+
+# ===== Python =====
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.sqlite3
+
+# ===== Flutter / Dart =====
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+*.iml
+local.properties
+
+# ===== IDE / SO =====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,51 @@
+# Levanta PostgreSQL + los 3 servicios.  Requisito: backend/.env generado
+#   (cd backend && python scripts/generate_env.py)
+# Uso:  docker compose up --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: securewallet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U securewallet"]
+      interval: 5s
+      retries: 10
+
+  wallet:
+    build: ./backend
+    command: uvicorn wallet_service.main:app --host 0.0.0.0 --port 8001
+    env_file: ./backend/.env
+    environment:
+      WALLET_DATABASE_URL: postgresql+psycopg://securewallet:${POSTGRES_PASSWORD:-devpassword}@db:5432/wallet_db
+    ports: ["8001:8001"]
+    depends_on:
+      db: { condition: service_healthy }
+
+  bank:
+    build: ./backend
+    command: uvicorn bank_service.main:app --host 0.0.0.0 --port 8002
+    env_file: ./backend/.env
+    environment:
+      BANK_DATABASE_URL: postgresql+psycopg://securewallet:${POSTGRES_PASSWORD:-devpassword}@db:5432/bank_db
+    ports: ["8002:8002"]
+    depends_on:
+      db: { condition: service_healthy }
+
+  store:
+    build: ./backend
+    command: uvicorn store_service.main:app --host 0.0.0.0 --port 8003
+    env_file: ./backend/.env
+    environment:
+      STORE_DATABASE_URL: postgresql+psycopg://securewallet:${POSTGRES_PASSWORD:-devpassword}@db:5432/store_db
+      BANK_URL: http://bank:8002
+    ports: ["8003:8003"]
+    depends_on:
+      db: { condition: service_healthy }
+      bank: { condition: service_started }
+
+volumes:
+  pgdata:

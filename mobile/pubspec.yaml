@@ -1,0 +1,29 @@
+name: secure_wallet
+description: App móvil SecureWallet - proyecto de ciberseguridad (Wallet, Banco y Tienda simulados).
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.11.1
+  flutter_secure_storage: ^11.2.0
+  local_auth: ^3.0.2
+  cryptography: ^2.9.0
+  go_router: ^18.1.2
+  flutter_riverpod: ^3.4.3
+  pointycastle: ^4.0.0
+  http: ^1.6.0
+  sqflite_sqlcipher: ^3.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

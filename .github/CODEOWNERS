@@ -1,0 +1,18 @@
+# Reemplaza @usuarioN por los usuarios reales de GitHub de cada equipo.
+
+# Equipo Wallet (3)
+/mobile/lib/features/wallet/   @usuario1 @usuario2 @usuario3
+/backend/wallet_service/       @usuario1 @usuario2 @usuario3
+
+# Equipo Banco (3)
+/mobile/lib/features/bank/     @usuario4 @usuario5 @usuario6
+/backend/bank_service/         @usuario4 @usuario5 @usuario6
+
+# Equipo Tienda (2)
+/mobile/lib/features/store/    @usuario7 @usuario8
+/backend/store_service/        @usuario7 @usuario8
+
+# Núcleo de seguridad: revisión obligatoria del arquitecto de seguridad
+/backend/shared/               @usuario1
+/mobile/lib/core/              @usuario1
+/docs/THREAT_MODEL.md          @usuario1

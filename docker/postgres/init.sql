@@ -1,0 +1,3 @@
+CREATE DATABASE wallet_db;
+CREATE DATABASE bank_db;
+CREATE DATABASE store_db;
