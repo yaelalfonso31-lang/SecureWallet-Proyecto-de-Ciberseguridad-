@@ -12,4 +12,5 @@ cryptography>=43
 pyjwt>=2.9
 pyotp>=2.9
 httpx>=0.28.1
+
 pytest>=8.3
