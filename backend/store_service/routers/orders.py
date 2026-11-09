@@ -12,6 +12,7 @@ from shared.security.signing import verify
 from store_service.bank_client import process_payment
 from store_service.database import get_db
 from store_service.models import Order, Product
+from store_service.deps import current_user_id
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -28,7 +29,7 @@ class OrderCreateIn(BaseModel):
 
 
 @router.post("", status_code=201)
-def create_order(body: OrderCreateIn, db: Session = Depends(get_db)):
+def create_order(body: OrderCreateIn, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     total = 0
     items = []
     for item in body.items:
@@ -40,7 +41,12 @@ def create_order(body: OrderCreateIn, db: Session = Depends(get_db)):
         total += product.price_cents * item.quantity
         items.append({"product_id": product.id, "quantity": item.quantity, "unit_price_cents": product.price_cents})
 
-    order = Order(order_id="ord_" + secrets.token_hex(8), items_json=json.dumps(items), total_cents=total)
+    order = Order(
+        order_id="ord_" + secrets.token_hex(8),
+        user_id=user_id,
+        items_json=json.dumps(items),
+        total_cents=total,
+    )
     db.add(order)
     db.commit()
     return {
@@ -51,11 +57,17 @@ def create_order(body: OrderCreateIn, db: Session = Depends(get_db)):
         "status": order.status,
     }
 
+def _get_own_order(db: Session, order_id: str, user_id: str) -> Order:
+    order = db.get(Order, order_id)
+    # 404 (no 403) tanto si no existe como si es de otro usuario: no revela qué ids existen.
+    if order is None or order.user_id != user_id:
+        raise HTTPException(404, "Orden no encontrada")
+    return order
 
 @router.post("/{order_id}/pay")
-def pay_order(order_id: str, body: SignedOrder, db: Session = Depends(get_db)):
+def pay_order(order_id: str, body: SignedOrder, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     """Recibe la orden firmada por la Wallet, la manda al Banco y verifica el recibo firmado."""
-    order = db.get(Order, order_id)
+    order = _get_own_order(db, order_id, user_id)
     if order is None:
         raise HTTPException(404, "Orden no encontrada")
     if order.status != "pending":
@@ -108,8 +120,8 @@ def pay_order(order_id: str, body: SignedOrder, db: Session = Depends(get_db)):
 
 
 @router.get("/{order_id}")
-def get_order(order_id: str, db: Session = Depends(get_db)):
-    order = db.get(Order, order_id)
+def get_order(order_id: str, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    order = _get_own_order(db, order_id, user_id)
     if order is None:
         raise HTTPException(404, "Orden no encontrada")
     return {
@@ -121,3 +133,4 @@ def get_order(order_id: str, db: Session = Depends(get_db)):
         "receipt": json.loads(order.receipt_json) if order.receipt_json else None,
         "signature": order.receipt_signature,
     }
+
