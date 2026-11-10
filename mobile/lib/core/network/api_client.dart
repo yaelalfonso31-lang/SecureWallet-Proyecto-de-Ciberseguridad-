@@ -55,5 +55,5 @@ final bankDioProvider = Provider<Dio>(
   (ref) => buildDio(AppConfig.bankUrl, ref.watch(secureStoreProvider)),
 );
 final storeDioProvider = Provider<Dio>(
-  (ref) => buildDio(AppConfig.storeUrl, ref.watch(secureStoreProvider)),
+  (ref) => buildDio(AppConfig.storeUrl, ref.watch(secureStoreProvider), auth: true),
 );
