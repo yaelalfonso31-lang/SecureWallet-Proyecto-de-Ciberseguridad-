@@ -34,6 +34,7 @@ STORE_DATABASE_URL=sqlite:///./store.db
 
 JWT_SECRET={secrets.token_urlsafe(48)}
 ACCESS_TOKEN_MINUTES=15
+BANK_JWT_SECRET={secrets.token_urlsafe(48)}
 
 DATA_ENCRYPTION_KEY={data_key}
 

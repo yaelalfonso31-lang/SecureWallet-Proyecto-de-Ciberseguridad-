@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 15
 
+    # JWT propio del Banco (aud="bank"). Debe ser DISTINTO de jwt_secret.
+    bank_jwt_secret: str = ""
+
     data_encryption_key: str = ""  # base64url de 32 bytes (AES-256)
 
     wallet_signing_private_key: str = ""

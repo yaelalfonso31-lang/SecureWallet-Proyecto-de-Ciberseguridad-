@@ -14,11 +14,28 @@ La referencia completa y siempre actualizada está en `/docs` de cada servicio (
 | POST | `/payments/authorize` | JWT | Devuelve `{order, signature}` firmado por la Wallet |
 
 ## Banco — `:8002`
+
+Tabla de endpoints del Banco. Es el **contrato base (B0)** entre las dos personas del
+equipo: los marcados como _(pendiente)_ aún no existen y se implementan en la tarea
+indicada. Los tokens del Banco son JWT propios con `aud="bank"`, distintos de los de
+la Wallet, y se envían como `Authorization: Bearer <token>`.
+
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | GET | `/promotions` | — | Bonos y promociones activas |
 | GET | `/bank/public-key` | — | Clave pública Ed25519 del Banco |
 | POST | `/transactions/process` | `X-API-Key` | Procesa orden firmada → `{receipt, signature}`. 400 firma/expirada, 402 fondos, 409 repetida |
+| POST | `/oauth/authorize` | aserción Wallet | _(pendiente, B2)_ Login + PKCE → `{code, state}`. 400 credenciales/aserción, 423 bloqueado |
+| POST | `/oauth/token` | — | _(pendiente, B2)_ Canjea `code` + `code_verifier` → `{access_token, scope}`. 400 código inválido/usado/expirado |
+| GET | `/accounts/me` | JWT Banco `accounts:read` | _(pendiente, B3)_ Saldo, número enmascarado y estado de la cuenta del dueño del token |
+| GET | `/accounts/me/movements` | JWT Banco `accounts:read` | _(pendiente, B3)_ Movimientos del dueño (`limit` 1–100, `before`). Anti-IDOR |
+| GET | `/promotions/{id}` | — | _(pendiente, B4-a)_ Detalle de una promoción |
+| POST | `/promotions/{id}/redeem` | JWT Banco `promotions:redeem` | _(pendiente, B4-a)_ Canje de un solo uso. 400 vencida, 409 ya canjeada |
+| POST | `/transfers/to-wallet` | JWT Banco `transfers:write` | _(pendiente, B5)_ Recarga a la Wallet → comprobante firmado. Idempotente |
+| POST | `/transfers/from-wallet` | JWT Banco `transfers:write` | _(pendiente, B5)_ Retiro desde la Wallet, verifica comprobante firmado |
+| GET | `/admin/promotions` | JWT Banco admin | _(pendiente, B6)_ Lista promociones incluidas las inactivas. 403 sin rol admin |
+| POST | `/admin/promotions` | JWT Banco admin | _(pendiente, B6)_ Crea promoción. 422 validación de rangos |
+| PATCH | `/admin/promotions/{id}` | JWT Banco admin | _(pendiente, B6)_ Edita o desactiva promoción |
 
 ## Tienda — `:8003`
 | Método | Ruta | Auth | Descripción |
