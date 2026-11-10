@@ -1,0 +1,3326 @@
+﻿
+=== .github/PULL_REQUEST_TEMPLATE.md ===
+## Â¿QuÃ© cambia?
+<!-- DescripciÃ³n corta. Enlaza el issue: Closes #N -->
+
+## MÃ³dulo
+- [ ] Wallet  - [ ] Banco  - [ ] Tienda  - [ ] Shared/Core
+
+## Checklist
+- [ ] Las pruebas pasan (`pytest` / `flutter test`)
+- [ ] No hay secretos, llaves ni datos reales en el cÃ³digo
+- [ ] ValidÃ© entradas y no registro datos sensibles en logs
+- [ ] Si toca criptografÃ­a/autenticaciÃ³n, pedÃ­ revisiÃ³n al arquitecto de seguridad
+- [ ] ActualicÃ© la documentaciÃ³n si cambiÃ³ un endpoint (`docs/API.md`)
+
+=== .github/dependabot.yml ===
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule: { interval: weekly }
+  - package-ecosystem: pub
+    directory: /mobile
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+
+=== .github/workflows/ci.yml ===
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+
+        with:
+          python-version: "3.12"
+      - run: pip install -r backend/requirements.txt
+      - run: cd backend && python -m pytest -q
+
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: cd mobile && flutter pub get
+      - run: cd mobile && flutter analyze
+      - run: cd mobile && flutter test
+
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+=== README.md ===
+# SecureWallet
+
+Monedero digital (Wallet) para el proyecto de **Ciberseguridad**: app mÃ³vil en **Flutter** y backend en **Python FastAPI**, con un **Banco simulado** y una **Tienda online simulada**. El objetivo es demostrar el uso de cifrado, hash, firma electrÃ³nica y comunicaciÃ³n/transacciones seguras.
+
+> âš ï¸ Proyecto acadÃ©mico. Usa Ãºnicamente datos de prueba (tarjeta de prueba `4111 1111 1111 1111`). Nunca datos reales.
+
+## Equipos
+
+| MÃ³dulo | Personas | Mobile (`mobile/lib/features/`) | Backend (`backend/`) |
+|---|---|---|---|
+| Wallet | 3 | `wallet/` | `wallet_service/` (puerto 8001) |
+| Banco simulado | 3 | `bank/` | `bank_service/` (puerto 8002) |
+| Tienda simulada | 2 | `store/` | `store_service/` (puerto 8003) |
+| NÃºcleo de seguridad | arquitecto (1 del equipo Wallet) | `mobile/lib/core/` | `backend/shared/` |
+
+## Arquitectura (resumen)
+
+```
+App Flutter â”€â”€HTTPSâ”€â”€â–º Wallet Service â”€â”€firma Ed25519â”€â”€â”
+     â”‚                                                  â–¼
+     â”œâ”€â”€â”€â”€â”€â”€â”€â”€HTTPSâ”€â”€â–º Tienda Service â”€â”€orden firmadaâ”€â”€â–º Banco Service
+     â””â”€â”€â”€â”€â”€â”€â”€â”€HTTPSâ”€â”€â–º Banco Service        â—„â”€â”€recibo firmado Ed25519â”€â”€â”˜
+```
+
+Detalle y diagrama de secuencia del pago en [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
+
+## Inicio rÃ¡pido
+
+### 1. Backend
+
+```bash
+cd backend
+python -m venv .venv
+# Windows (PowerShell): .venv\Scripts\Activate.ps1      Mac/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+
+python scripts/generate_env.py      # crea .env con secretos y llaves aleatorias (NO se sube a Git)
+python -m pytest -q                 # debe pasar todo
+
+# Un servicio por terminal:
+uvicorn wallet_service.main:app --port 8001 --reload
+uvicorn bank_service.main:app   --port 8002 --reload
+uvicorn store_service.main:app  --port 8003 --reload
+```
+
+DocumentaciÃ³n interactiva: http://localhost:8001/docs Â· :8002/docs Â· :8003/docs
+
+Alternativa con Docker (PostgreSQL + los 3 servicios): `docker compose up --build` (requiere `backend/.env`).
+
+### 2. App mÃ³vil
+
+Ver [`mobile/README.md`](mobile/README.md) (incluye `flutter create .` para generar `android/` e `ios/`).
+
+## QuÃ© ya estÃ¡ implementado
+
+- **Wallet:** registro, login con Argon2id, bloqueo por intentos fallidos, JWT de vida corta, tarjetas (validaciÃ³n Luhn, nÃºmero cifrado con AES-256-GCM, token en lugar del PAN, sin CVV), firma de Ã³rdenes de pago con Ed25519, bitÃ¡cora con hashes encadenados.
+- **Banco:** promociones, procesamiento de pagos que verifica firma, frescura (anti-replay por tiempo), unicidad (nonce/order_id), fondos, y emite **recibo firmado**.
+- **Tienda:** catÃ¡logo, Ã³rdenes, pago con Wallet verificando el recibo firmado del Banco.
+- **App:** login, registro, tarjetas, promociones, catÃ¡logo; almacenamiento seguro del token; verificador de firmas Ed25519 en Dart.
+- **Pruebas:** 25 pruebas automÃ¡ticas del backend (incluye flujo completo Wallet â†’ Tienda â†’ Banco).
+
+## Pendientes por equipo
+
+Consulta [`docs/BACKLOG_INICIAL.md`](docs/BACKLOG_INICIAL.md).
+
+## Flujo de trabajo en Git
+
+- `main` (protegida, entregas) â† `develop` (integraciÃ³n) â† `feature/<modulo>-<tarea>`.
+- Todo cambio entra por Pull Request con 1 revisiÃ³n; el CI debe estar en verde.
+- Commits: `feat(wallet): ...`, `fix(bank): ...`, `security(shared): ...`, `docs: ...`, `test: ...`.
+- Cada equipo trabaja en su carpeta; `core/` y `shared/` solo con revisiÃ³n del arquitecto de seguridad.
+- Secretos: solo en `.env` local. Compartan `.env.example`, nunca `.env`.
+
+=== SECURITY.md ===
+# PolÃ­tica de seguridad del equipo
+
+## Reglas obligatorias
+1. **Nunca** subir secretos: `.env`, llaves privadas, contraseÃ±as, tokens. (GitHub Push Protection y Gitleaks lo vigilan.)
+2. **Solo datos de prueba.** Prohibido usar tarjetas, cuentas o datos personales reales.
+3. **Nunca** guardar CVV. El nÃºmero de tarjeta (PAN) solo se almacena cifrado (AES-256-GCM); fuera de la Wallet circula el *token*.
+4. **No registrar** (logs, consola, bitÃ¡cora) contraseÃ±as, PAN, tokens ni llaves.
+5. ContraseÃ±as con **Argon2id**; nada de MD5/SHA simple para contraseÃ±as.
+6. Toda consulta SQL va parametrizada (usar SQLAlchemy). Toda entrada se valida con Pydantic.
+7. Cambios en `backend/shared/` y `mobile/lib/core/` requieren revisiÃ³n del arquitecto de seguridad.
+8. Dependencias nuevas: revisar que estÃ©n mantenidas y sin vulnerabilidades conocidas.
+
+## Reportar un problema
+Abre un Issue con la etiqueta `security` (repositorio privado) o avisa directamente al arquitecto de seguridad. Si un secreto se subiÃ³ por error, **rÃ³talo de inmediato** (cambiar el valor), no basta con borrar el commit.
+
+=== backend/bank_service/__init__.py ===
+
+=== backend/bank_service/database.py ===
+from sqlalchemy.orm import DeclarativeBase
+
+from shared.config import settings
+from shared.database import make_session_factory
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+engine, SessionLocal = make_session_factory(settings.bank_database_url)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+=== backend/bank_service/deps.py ===
+"""AutenticaciÃ³n y autorizaciÃ³n del Banco.
+
+El Banco emite sus propios JWT, firmados con `BANK_JWT_SECRET` y con `aud="bank"`,
+independientes de los tokens de la Wallet. Estas dependencias son el contrato que
+comparten las dos personas del equipo Banco (definido en B0).
+"""
+from datetime import datetime, timedelta, timezone
+
+import jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
+
+from bank_service.database import get_db
+from bank_service.models import BankCustomer
+from shared.config import settings
+
+bearer = HTTPBearer(auto_error=False)
+
+BANK_TOKEN_AUDIENCE = "bank"
+
+# Scopes que puede tener un token del Banco. El fixture de pruebas los concede todos.
+ALL_SCOPES = (
+    "accounts:read",
+    "promotions:read",
+    "promotions:redeem",
+    "transfers:write",
+)
+
+
+def create_bank_token(customer_id: str, scopes=ALL_SCOPES) -> str:
+    """Emite un JWT del Banco para un cliente, con `aud="bank"` y los scopes dados."""
+    if not settings.bank_jwt_secret:
+        raise RuntimeError("BANK_JWT_SECRET no estÃ¡ configurada (ver scripts/generate_env.py)")
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": customer_id,
+        "aud": BANK_TOKEN_AUDIENCE,
+        "scope": " ".join(scopes),
+        "iat": now,
+        "exp": now + timedelta(minutes=settings.access_token_minutes),
+    }
+    return jwt.encode(payload, settings.bank_jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def _decode_bank_token(token: str) -> dict:
+    """Valida firma, expiraciÃ³n y `aud="bank"`. Lanza jwt.PyJWTError si falla."""
+    return jwt.decode(
+        token,
+        settings.bank_jwt_secret,
+        algorithms=[settings.jwt_algorithm],
+        audience=BANK_TOKEN_AUDIENCE,
+    )
+
+
+def _get_payload(creds: HTTPAuthorizationCredentials | None) -> dict:
+    unauthorized = HTTPException(status.HTTP_401_UNAUTHORIZED, "No autenticado")
+    if creds is None:
+        raise unauthorized
+    try:
+        return _decode_bank_token(creds.credentials)
+    except jwt.PyJWTError:
+        raise unauthorized
+
+
+def _customer_from_payload(payload: dict, db: Session) -> BankCustomer:
+    customer = db.get(BankCustomer, payload.get("sub"))
+    if customer is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "No autenticado")
+    return customer
+
+
+def get_current_customer(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: Session = Depends(get_db),
+) -> BankCustomer:
+    """Devuelve el cliente dueÃ±o del token (cargado desde la BD)."""
+    return _customer_from_payload(_get_payload(creds), db)
+
+
+def require_scope(scope: str):
+    """FÃ¡brica de dependencias: exige que el token incluya `scope`."""
+
+    def dependency(
+        creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+        db: Session = Depends(get_db),
+    ) -> BankCustomer:
+        payload = _get_payload(creds)
+        if scope not in payload.get("scope", "").split():
+            raise HTTPException(status.HTTP_403_FORBIDDEN, f"Scope requerido: {scope}")
+        return _customer_from_payload(payload, db)
+
+    return dependency
+
+
+def require_admin(customer: BankCustomer = Depends(get_current_customer)) -> BankCustomer:
+    """Exige rol admin. El rol se lee de la BD (vÃ­a get_current_customer), no del token."""
+    if customer.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Se requiere rol de administrador")
+    return customer
+
+=== backend/bank_service/main.py ===
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from sqlalchemy import select
+
+from bank_service.database import Base, SessionLocal, engine
+from bank_service.models import Promotion
+from bank_service.routers import promotions, transactions
+from shared.http import harden_app
+
+SEED_PROMOTIONS = [
+    ("Bono de bienvenida", "10% de descuento en tu primera compra con la Wallet", 10),
+    ("Fin de semana tecnolÃ³gico", "15% en electrÃ³nica pagando con la Wallet", 15),
+    ("Cashback libros", "5% de devoluciÃ³n en libros y papelerÃ­a", 5),
+]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(engine)
+    with SessionLocal() as db:
+        if db.scalar(select(Promotion)) is None:
+            db.add_all(
+                Promotion(title=t, description=d, discount_percent=p) for t, d, p in SEED_PROMOTIONS
+            )
+            db.commit()
+    yield
+
+
+app = FastAPI(title="SecureWallet - Bank Service (simulado)", version="0.1.0", lifespan=lifespan)
+harden_app(app)
+
+app.include_router(promotions.router)
+app.include_router(transactions.router)
+
+
+@app.get("/health", tags=["health"])
+def health():
+    return {"service": "bank", "status": "ok"}
+
+=== backend/bank_service/models.py ===
+import uuid
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
+
+from bank_service.database import Base
+from shared.timeutil import utcnow
+
+
+def _uuid() -> str:
+    return uuid.uuid4().hex
+
+
+class BankCustomer(Base):
+    """Cliente del Banco. Puede ser `customer` o `admin`.
+
+    Es la identidad propia del Banco, distinta del usuario de la Wallet.
+    """
+
+    __tablename__ = "bank_customers"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    role: Mapped[str] = mapped_column(String(20), default="customer")  # customer | admin
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Account(Base):
+    __tablename__ = "accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_ref: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # id del usuario en la Wallet
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("bank_customers.id"), nullable=True, index=True)
+    account_number: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active | frozen
+    balance_cents: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Movement(Base):
+    """Movimiento inmutable de una cuenta (cargo o abono). Da trazabilidad."""
+
+    __tablename__ = "movements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(10))  # debit | credit
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    balance_after_cents: Mapped[int] = mapped_column(Integer)
+    concept: Mapped[str] = mapped_column(String(200), default="")
+    reference: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class AuthorizationCode(Base):
+    """CÃ³digo de autorizaciÃ³n OAuth2 + PKCE (un solo uso, vida corta)."""
+
+    __tablename__ = "authorization_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    code_challenge: Mapped[str] = mapped_column(String(128))
+    customer_id: Mapped[str] = mapped_column(ForeignKey("bank_customers.id"), index=True)
+    wallet_user_id: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Promotion(Base):
+    __tablename__ = "promotions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(String(300))
+    discount_percent: Mapped[int] = mapped_column(Integer)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class PromotionRedemption(Base):
+    """Canje de una promociÃ³n por una cuenta. De un solo uso."""
+
+    __tablename__ = "promotion_redemptions"
+    __table_args__ = (
+        UniqueConstraint("promotion_id", "account_id", name="uq_redemption_promotion_account"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    promotion_id: Mapped[int] = mapped_column(ForeignKey("promotions.id"), index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    redeemed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    used_in_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class Transfer(Base):
+    """Transferencia banco <-> wallet, con idempotencia y nonce anti-replay."""
+
+    __tablename__ = "transfers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    transfer_id: Mapped[str] = mapped_column(String(32), unique=True, index=True, default=_uuid)
+    nonce: Mapped[str] = mapped_column(String(64), unique=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    direction: Mapped[str] = mapped_column(String(20))  # to_wallet | from_wallet
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class ProcessedOrder(Base):
+    """Ã“rdenes ya procesadas. Los UNIQUE de order_id y nonce evitan ataques de repeticiÃ³n (replay)."""
+
+    __tablename__ = "processed_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_id: Mapped[str] = mapped_column(String(64), unique=True)
+    nonce: Mapped[str] = mapped_column(String(64), unique=True)
+    payer: Mapped[str] = mapped_column(String(64))
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    receipt_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+=== backend/bank_service/routers/__init__.py ===
+
+=== backend/bank_service/routers/promotions.py ===
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from bank_service.database import get_db
+from bank_service.models import Promotion
+
+router = APIRouter(tags=["promotions"])
+
+
+class PromotionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    description: str
+    discount_percent: int
+
+
+@router.get("/promotions", response_model=list[PromotionOut])
+def list_promotions(db: Session = Depends(get_db)):
+    return list(db.scalars(select(Promotion).where(Promotion.active.is_(True))))
+
+=== backend/bank_service/routers/transactions.py ===
+import json
+import time
+import uuid
+
+from fastapi import APIRouter, Depends, Header, HTTPException
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
+
+from bank_service.database import get_db
+from bank_service.models import Account, ProcessedOrder
+from shared.config import settings
+from shared.schemas import SignedOrder, SignedReceipt
+from shared.security.hashing import constant_time_equals, sha256_hex
+from shared.security.signing import canonical_json, sign, verify
+from shared.timeutil import utcnow
+
+router = APIRouter(tags=["transactions"])
+
+DEMO_INITIAL_BALANCE_CENTS = 100_000  # $1,000.00 MXN de saldo de prueba
+
+
+def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    """AutenticaciÃ³n servicio-a-servicio (Tienda -> Banco).
+
+    TODO equipo Banco: reemplazar por mTLS entre servicios.
+    """
+    expected = settings.bank_api_key
+    if not expected or not x_api_key or not constant_time_equals(x_api_key, expected):
+        raise HTTPException(401, "API key invÃ¡lida")
+
+
+def _get_or_create_account(db: Session, owner_ref: str) -> Account:
+    account = db.scalar(select(Account).where(Account.owner_ref == owner_ref))
+    if account is None:
+        account = Account(owner_ref=owner_ref, balance_cents=DEMO_INITIAL_BALANCE_CENTS)
+        db.add(account)
+        db.flush()
+    return account
+
+
+@router.get("/bank/public-key")
+def bank_public_key():
+    """Clave pÃºblica con la que se verifican los recibos firmados por el Banco."""
+    return {"algorithm": "Ed25519", "public_key": settings.bank_signing_public_key}
+
+
+@router.post("/transactions/process", response_model=SignedReceipt, dependencies=[Depends(require_api_key)])
+def process_transaction(body: SignedOrder, db: Session = Depends(get_db)):
+    order = body.order.model_dump()
+
+    # 1) Autenticidad e integridad: la firma debe ser de la Wallet y la orden no pudo cambiar.
+    if not verify(settings.wallet_signing_public_key, order, body.signature):
+        raise HTTPException(400, "Firma invÃ¡lida")
+
+    # 2) Frescura: rechaza Ã³rdenes viejas (ventana corta anti-replay).
+    if abs(time.time() - order["timestamp"]) > settings.order_max_age_seconds:
+        raise HTTPException(400, "Orden expirada")
+
+    # 3) Unicidad: el mismo nonce/order_id no se procesa dos veces.
+    duplicate = db.scalar(
+        select(ProcessedOrder).where(
+            or_(ProcessedOrder.nonce == order["nonce"], ProcessedOrder.order_id == order["order_id"])
+        )
+    )
+    if duplicate:
+        raise HTTPException(409, "Orden ya procesada")
+
+    # 4) Fondos.
+    account = _get_or_create_account(db, order["payer"])
+    if account.balance_cents < order["amount_cents"]:
+        raise HTTPException(402, "Fondos insuficientes")
+    account.balance_cents -= order["amount_cents"]
+
+    # 5) Recibo firmado por el Banco (no repudio).
+    receipt = {
+        "receipt_id": uuid.uuid4().hex,
+        "order_id": order["order_id"],
+        "payer": order["payer"],
+        "amount_cents": order["amount_cents"],
+        "currency": order["currency"],
+        "status": "approved",
+        "processed_at": utcnow().isoformat(),
+        "order_hash": sha256_hex(canonical_json(order)),
+    }
+    signature = sign(settings.bank_signing_private_key, receipt)
+
+    db.add(
+        ProcessedOrder(
+            order_id=order["order_id"],
+            nonce=order["nonce"],
+            payer=order["payer"],
+            amount_cents=order["amount_cents"],
+            receipt_json=json.dumps(receipt),
+        )
+    )
+    db.commit()
+    return SignedReceipt(receipt=receipt, signature=signature)
+
+=== backend/scripts/generate_env.py ===
+"""Genera un archivo .env con secretos aleatorios para desarrollo.
+
+Uso (desde la carpeta backend/):
+    python scripts/generate_env.py          # crea .env (no sobreescribe)
+    python scripts/generate_env.py --force  # sobreescribe
+"""
+import base64
+import os
+import secrets
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from shared.security.signing import generate_keypair  # noqa: E402
+
+TARGET = Path(__file__).resolve().parents[1] / ".env"
+
+
+def main() -> None:
+    if TARGET.exists() and "--force" not in sys.argv:
+        print(f"{TARGET} ya existe. Usa --force para sobreescribirlo.")
+        return
+
+    wallet_priv, wallet_pub = generate_keypair()
+    bank_priv, bank_pub = generate_keypair()
+    data_key = base64.urlsafe_b64encode(os.urandom(32)).decode()
+
+    content = f"""ENVIRONMENT=dev
+
+WALLET_DATABASE_URL=sqlite:///./wallet.db
+BANK_DATABASE_URL=sqlite:///./bank.db
+STORE_DATABASE_URL=sqlite:///./store.db
+
+JWT_SECRET={secrets.token_urlsafe(48)}
+ACCESS_TOKEN_MINUTES=15
+BANK_JWT_SECRET={secrets.token_urlsafe(48)}
+
+DATA_ENCRYPTION_KEY={data_key}
+
+WALLET_SIGNING_PRIVATE_KEY={wallet_priv}
+WALLET_SIGNING_PUBLIC_KEY={wallet_pub}
+BANK_SIGNING_PRIVATE_KEY={bank_priv}
+BANK_SIGNING_PUBLIC_KEY={bank_pub}
+
+BANK_API_KEY={secrets.token_urlsafe(32)}
+BANK_URL=http://localhost:8002
+"""
+    TARGET.write_text(content, encoding="utf-8")
+    print(f"Listo: {TARGET} creado con secretos nuevos. No lo subas a GitHub.")
+
+
+if __name__ == "__main__":
+    main()
+
+=== backend/shared/__init__.py ===
+
+=== backend/shared/config.py ===
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """ConfiguraciÃ³n comÃºn. Los valores vienen de variables de entorno o de .env."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    environment: str = "dev"
+
+    wallet_database_url: str = "sqlite:///./wallet.db"
+    bank_database_url: str = "sqlite:///./bank.db"
+    store_database_url: str = "sqlite:///./store.db"
+
+    jwt_secret: str = ""
+    jwt_algorithm: str = "HS256"
+    access_token_minutes: int = 15
+
+    # JWT propio del Banco (aud="bank"). Debe ser DISTINTO de jwt_secret.
+    bank_jwt_secret: str = ""
+
+    data_encryption_key: str = ""  # base64url de 32 bytes (AES-256)
+
+    wallet_signing_private_key: str = ""
+    wallet_signing_public_key: str = ""
+    bank_signing_private_key: str = ""
+    bank_signing_public_key: str = ""
+
+    bank_api_key: str = ""
+    bank_url: str = "http://localhost:8002"
+
+    max_failed_logins: int = 5
+    lockout_minutes: int = 15
+    order_max_age_seconds: int = 120
+
+
+settings = Settings()
+
+=== backend/shared/database.py ===
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+
+def make_session_factory(url: str):
+    """Crea (engine, SessionLocal) para una URL de base de datos."""
+    kwargs = {}
+    if url.startswith("sqlite"):
+        kwargs["connect_args"] = {"check_same_thread": False}
+    engine = create_engine(url, **kwargs)
+    session_local = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    return engine, session_local
+
+=== backend/shared/http.py ===
+from fastapi import FastAPI
+from starlette.middleware.base import BaseHTTPMiddleware
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        return response
+
+
+def harden_app(app: FastAPI) -> None:
+    """Aplica cabeceras de seguridad. TODO equipo: rate limiting (slowapi) y CORS restrictivo."""
+    app.add_middleware(SecurityHeadersMiddleware)
+
+=== backend/shared/schemas.py ===
+"""Contratos compartidos entre Wallet, Banco y Tienda."""
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class PaymentOrder(BaseModel):
+    """Orden de pago que firma la Wallet y valida el Banco."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    order_id: str = Field(min_length=1, max_length=64)
+    merchant: str = Field(min_length=1, max_length=100)
+    amount_cents: int = Field(gt=0, le=100_000_000)
+    currency: str = Field(default="MXN", pattern=r"^[A-Z]{3}$")
+    payer: str = Field(min_length=1, max_length=64)
+    card_token: str | None = None
+    nonce: str = Field(min_length=16, max_length=64)  # anti-replay
+    timestamp: int  # epoch en segundos (anti-replay)
+
+
+class SignedOrder(BaseModel):
+    order: PaymentOrder
+    signature: str
+
+
+class SignedReceipt(BaseModel):
+    receipt: dict
+    signature: str
+
+=== backend/shared/security/__init__.py ===
+
+=== backend/shared/security/crypto.py ===
+"""Cifrado autenticado AES-256-GCM para datos en reposo (p. ej. nÃºmero de tarjeta)."""
+import base64
+import os
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from shared.config import settings
+
+
+def generate_key() -> str:
+    return base64.urlsafe_b64encode(AESGCM.generate_key(bit_length=256)).decode()
+
+
+def _load_key() -> bytes:
+    if not settings.data_encryption_key:
+        raise RuntimeError("DATA_ENCRYPTION_KEY no estÃ¡ configurada (ver scripts/generate_env.py)")
+    key = base64.urlsafe_b64decode(settings.data_encryption_key)
+    if len(key) != 32:
+        raise RuntimeError("DATA_ENCRYPTION_KEY debe ser de 32 bytes")
+    return key
+
+
+def encrypt(plaintext: str, aad: str = "") -> str:
+    """Cifra y devuelve base64url(nonce || ciphertext+tag).
+
+    `aad` (datos asociados, p. ej. el id del usuario) liga el cifrado a su dueÃ±o:
+    si alguien copia el valor a otro registro, el descifrado falla.
+    """
+    nonce = os.urandom(12)  # nonce Ãºnico por cifrado, nunca reutilizar
+    ciphertext = AESGCM(_load_key()).encrypt(nonce, plaintext.encode(), aad.encode() or None)
+    return base64.urlsafe_b64encode(nonce + ciphertext).decode()
+
+
+def decrypt(token: str, aad: str = "") -> str:
+    raw = base64.urlsafe_b64decode(token)
+    nonce, ciphertext = raw[:12], raw[12:]
+    return AESGCM(_load_key()).decrypt(nonce, ciphertext, aad.encode() or None).decode()
+
+=== backend/shared/security/hashing.py ===
+import hashlib
+import hmac
+
+from shared.security.signing import canonical_json
+
+
+def sha256_hex(data: bytes | str) -> str:
+    if isinstance(data, str):
+        data = data.encode()
+    return hashlib.sha256(data).hexdigest()
+
+
+def hmac_sha256_hex(key: str, message: str) -> str:
+    return hmac.new(key.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+
+def constant_time_equals(a: str, b: str) -> bool:
+    return hmac.compare_digest(a, b)
+
+
+def chain_hash(prev_hash: str, record: dict) -> str:
+    """Hash encadenado: cada registro incluye el hash del anterior (bitÃ¡cora a prueba de manipulaciÃ³n)."""
+    return sha256_hex(prev_hash + canonical_json(record).decode())
+
+=== backend/shared/security/passwords.py ===
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
+
+# argon2-cffi usa Argon2id por defecto, con sal aleatoria por contraseÃ±a.
+_ph = PasswordHasher()
+
+
+def hash_password(password: str) -> str:
+    return _ph.hash(password)
+
+
+def verify_password(password_hash: str, password: str) -> bool:
+    try:
+        return _ph.verify(password_hash, password)
+    except (VerifyMismatchError, InvalidHashError):
+        return False
+
+
+def needs_rehash(password_hash: str) -> bool:
+    return _ph.check_needs_rehash(password_hash)
+
+=== backend/shared/security/signing.py ===
+"""Firma electrÃ³nica con Ed25519 sobre JSON canÃ³nico."""
+import base64
+import json
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
+
+
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode()
+
+
+def generate_keypair() -> tuple[str, str]:
+    """Devuelve (clave_privada, clave_pÃºblica) en base64url."""
+    private = Ed25519PrivateKey.generate()
+    private_bytes = private.private_bytes(
+        serialization.Encoding.Raw,
+        serialization.PrivateFormat.Raw,
+        serialization.NoEncryption(),
+    )
+    public_bytes = private.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    return _b64(private_bytes), _b64(public_bytes)
+
+
+def canonical_json(obj) -> bytes:
+    """SerializaciÃ³n determinista: ambas partes deben firmar/verificar los mismos bytes.
+
+    La app Flutter implementa la misma regla (ver mobile/lib/core/security/receipt_verifier.dart).
+    """
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def sign(private_key_b64: str, payload: dict) -> str:
+    if not private_key_b64:
+        raise RuntimeError("Falta la clave privada de firma (ver scripts/generate_env.py)")
+    key = Ed25519PrivateKey.from_private_bytes(base64.urlsafe_b64decode(private_key_b64))
+    return _b64(key.sign(canonical_json(payload)))
+
+
+def verify(public_key_b64: str, payload: dict, signature_b64: str) -> bool:
+    if not public_key_b64:
+        raise RuntimeError("Falta la clave pÃºblica de verificaciÃ³n")
+    try:
+        key = Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(public_key_b64))
+        key.verify(base64.urlsafe_b64decode(signature_b64), canonical_json(payload))
+        return True
+    except (InvalidSignature, ValueError):
+        return False
+
+=== backend/shared/security/tokens.py ===
+from datetime import datetime, timedelta, timezone
+
+import jwt
+
+from shared.config import settings
+
+
+def create_access_token(subject: str, extra: dict | None = None) -> str:
+    if not settings.jwt_secret:
+        raise RuntimeError("JWT_SECRET no estÃ¡ configurada (ver scripts/generate_env.py)")
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": subject,
+        "iat": now,
+        "exp": now + timedelta(minutes=settings.access_token_minutes),
+        **(extra or {}),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_access_token(token: str) -> dict:
+    """Lanza jwt.PyJWTError si el token es invÃ¡lido o expirÃ³."""
+    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+
+=== backend/shared/timeutil.py ===
+from datetime import datetime, timezone
+
+
+def utcnow() -> datetime:
+    """Fecha/hora UTC sin zona horaria (naive), consistente con SQLite y PostgreSQL."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+=== backend/shared/validators.py ===
+def luhn_valid(number: str) -> bool:
+    """Algoritmo de Luhn para validar nÃºmeros de tarjeta."""
+    if not number.isdigit():
+        return False
+    total = 0
+    for i, ch in enumerate(reversed(number)):
+        digit = int(ch)
+        if i % 2 == 1:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+    return total % 10 == 0
+
+
+def detect_brand(number: str) -> str:
+    if number.startswith("4"):
+        return "visa"
+    if number[:2] in {"51", "52", "53", "54", "55"} or (
+        number[:4].isdigit() and 2221 <= int(number[:4]) <= 2720
+    ):
+        return "mastercard"
+    if number[:2] in {"34", "37"}:
+        return "amex"
+    return "desconocida"
+
+=== backend/store_service/__init__.py ===
+
+=== backend/store_service/bank_client.py ===
+import httpx
+
+from shared.config import settings
+
+
+def process_payment(payload: dict) -> httpx.Response:
+    """EnvÃ­a la orden firmada al Banco. Se aÃ­sla aquÃ­ para poder simularlo en las pruebas."""
+    return httpx.post(
+        f"{settings.bank_url}/transactions/process",
+        json=payload,
+        headers={"X-API-Key": settings.bank_api_key},
+        timeout=10,
+    )
+
+=== backend/store_service/database.py ===
+from sqlalchemy.orm import DeclarativeBase
+
+from shared.config import settings
+from shared.database import make_session_factory
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+engine, SessionLocal = make_session_factory(settings.store_database_url)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+=== backend/store_service/main.py ===
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from sqlalchemy import select
+
+from shared.http import harden_app
+from store_service.database import Base, SessionLocal, engine
+from store_service.models import Product
+from store_service.routers import orders, products
+
+SEED_PRODUCTS = [
+    ("AudÃ­fonos Bluetooth", "AudÃ­fonos inalÃ¡mbricos con cancelaciÃ³n de ruido", 79900, 25),
+    ("Teclado mecÃ¡nico", "Teclado mecÃ¡nico compacto, switches rojos", 129900, 15),
+    ("Mochila para laptop", "Mochila impermeable de 15 pulgadas", 59900, 30),
+    ("Cargador USB-C 65W", "Cargador rÃ¡pido para laptop y celular", 49900, 40),
+    ("Libro: CriptografÃ­a aplicada", "IntroducciÃ³n prÃ¡ctica a la criptografÃ­a", 39900, 10),
+]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(engine)
+    with SessionLocal() as db:
+        if db.scalar(select(Product)) is None:
+            db.add_all(
+                Product(name=n, description=d, price_cents=p, stock=s) for n, d, p, s in SEED_PRODUCTS
+            )
+            db.commit()
+    yield
+
+
+app = FastAPI(title="SecureWallet - Store Service (simulada)", version="0.1.0", lifespan=lifespan)
+harden_app(app)
+
+app.include_router(products.router)
+app.include_router(orders.router)
+
+
+@app.get("/health", tags=["health"])
+def health():
+    return {"service": "store", "status": "ok"}
+
+=== backend/store_service/models.py ===
+from datetime import datetime
+
+from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from shared.timeutil import utcnow
+from store_service.database import Base
+
+
+class Product(Base):
+    __tablename__ = "products"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(String(300))
+    price_cents: Mapped[int] = mapped_column(Integer)
+    stock: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    order_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    items_json: Mapped[str] = mapped_column(Text)
+    total_cents: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3), default="MXN")
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | paid
+    receipt_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    receipt_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+=== backend/store_service/routers/__init__.py ===
+
+=== backend/store_service/routers/orders.py ===
+import json
+import secrets
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from shared.config import settings
+from shared.schemas import SignedOrder
+from shared.security.signing import verify
+from store_service.bank_client import process_payment
+from store_service.database import get_db
+from store_service.models import Order, Product
+
+router = APIRouter(prefix="/orders", tags=["orders"])
+
+MERCHANT = "SecureStore"
+
+
+class OrderItemIn(BaseModel):
+    product_id: int
+    quantity: int = Field(ge=1, le=20)
+
+
+class OrderCreateIn(BaseModel):
+    items: list[OrderItemIn] = Field(min_length=1, max_length=50)
+
+
+@router.post("", status_code=201)
+def create_order(body: OrderCreateIn, db: Session = Depends(get_db)):
+    total = 0
+    items = []
+    for item in body.items:
+        product = db.get(Product, item.product_id)
+        if product is None:
+            raise HTTPException(404, f"Producto {item.product_id} no existe")
+        if product.stock < item.quantity:
+            raise HTTPException(409, f"Sin existencias de {product.name}")
+        total += product.price_cents * item.quantity
+        items.append({"product_id": product.id, "quantity": item.quantity, "unit_price_cents": product.price_cents})
+
+    order = Order(order_id="ord_" + secrets.token_hex(8), items_json=json.dumps(items), total_cents=total)
+    db.add(order)
+    db.commit()
+    return {
+        "order_id": order.order_id,
+        "merchant": MERCHANT,
+        "amount_cents": order.total_cents,
+        "currency": order.currency,
+        "status": order.status,
+    }
+
+
+@router.post("/{order_id}/pay")
+def pay_order(order_id: str, body: SignedOrder, db: Session = Depends(get_db)):
+    """Recibe la orden firmada por la Wallet, la manda al Banco y verifica el recibo firmado."""
+    order = db.get(Order, order_id)
+    if order is None:
+        raise HTTPException(404, "Orden no encontrada")
+    if order.status != "pending":
+        raise HTTPException(409, "La orden ya fue pagada")
+
+    signed = body.order
+    if (
+        signed.order_id != order_id
+        or signed.amount_cents != order.total_cents
+        or signed.merchant != MERCHANT
+        or signed.currency != order.currency
+    ):
+        raise HTTPException(400, "La orden firmada no coincide con la compra")
+
+    try:
+        response = process_payment(body.model_dump())
+    except httpx.HTTPError:
+        raise HTTPException(502, "No fue posible contactar al banco")
+
+    if response.status_code != 200:
+        try:
+            detail = response.json().get("detail", "Pago rechazado")
+        except ValueError:
+            detail = "Pago rechazado"
+        code = response.status_code if response.status_code in (400, 402, 409) else 502
+        raise HTTPException(code, detail)
+
+    data = response.json()
+    receipt, signature = data["receipt"], data["signature"]
+
+    # El recibo debe venir firmado por el Banco y coincidir con la compra.
+    if not verify(settings.bank_signing_public_key, receipt, signature):
+        raise HTTPException(502, "Recibo del banco con firma invÃ¡lida")
+    if (
+        receipt.get("status") != "approved"
+        or receipt.get("order_id") != order_id
+        or receipt.get("amount_cents") != order.total_cents
+    ):
+        raise HTTPException(502, "Recibo del banco inconsistente")
+
+    for item in json.loads(order.items_json):
+        product = db.get(Product, item["product_id"])
+        product.stock -= item["quantity"]
+    order.status = "paid"
+    order.receipt_json = json.dumps(receipt)
+    order.receipt_signature = signature
+    db.commit()
+
+    return {"order_id": order_id, "status": "paid", "receipt": receipt, "signature": signature}
+
+
+@router.get("/{order_id}")
+def get_order(order_id: str, db: Session = Depends(get_db)):
+    order = db.get(Order, order_id)
+    if order is None:
+        raise HTTPException(404, "Orden no encontrada")
+    return {
+        "order_id": order.order_id,
+        "status": order.status,
+        "amount_cents": order.total_cents,
+        "currency": order.currency,
+        "items": json.loads(order.items_json),
+        "receipt": json.loads(order.receipt_json) if order.receipt_json else None,
+        "signature": order.receipt_signature,
+    }
+
+=== backend/store_service/routers/products.py ===
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from store_service.database import get_db
+from store_service.models import Product
+
+router = APIRouter(prefix="/products", tags=["products"])
+
+
+class ProductOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str
+    price_cents: int
+    stock: int
+
+
+@router.get("", response_model=list[ProductOut])
+def list_products(db: Session = Depends(get_db)):
+    return list(db.scalars(select(Product).order_by(Product.id)))
+
+
+@router.get("/{product_id}", response_model=ProductOut)
+def get_product(product_id: int, db: Session = Depends(get_db)):
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(404, "Producto no encontrado")
+    return product
+
+=== backend/tests/__init__.py ===
+
+=== backend/tests/conftest.py ===
+"""ConfiguraciÃ³n de pruebas: claves y bases de datos temporales, nunca las reales."""
+import base64
+import os
+import tempfile
+
+from shared.security.signing import generate_keypair
+
+_tmp = tempfile.mkdtemp()
+WALLET_PRIV, WALLET_PUB = generate_keypair()
+BANK_PRIV, BANK_PUB = generate_keypair()
+BANK_API_KEY = "test-bank-api-key"
+
+os.environ.update(
+    {
+        "WALLET_DATABASE_URL": f"sqlite:///{_tmp}/wallet.db",
+        "BANK_DATABASE_URL": f"sqlite:///{_tmp}/bank.db",
+        "STORE_DATABASE_URL": f"sqlite:///{_tmp}/store.db",
+        "JWT_SECRET": "t" * 48,
+        "BANK_JWT_SECRET": "b" * 48,
+        "DATA_ENCRYPTION_KEY": base64.urlsafe_b64encode(os.urandom(32)).decode(),
+        "WALLET_SIGNING_PRIVATE_KEY": WALLET_PRIV,
+        "WALLET_SIGNING_PUBLIC_KEY": WALLET_PUB,
+        "BANK_SIGNING_PRIVATE_KEY": BANK_PRIV,
+        "BANK_SIGNING_PUBLIC_KEY": BANK_PUB,
+        "BANK_API_KEY": BANK_API_KEY,
+    }
+)
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from bank_service.main import app as bank_app  # noqa: E402
+from store_service.main import app as store_app  # noqa: E402
+from wallet_service.main import app as wallet_app  # noqa: E402
+
+
+@pytest.fixture(scope="session")
+def wallet_client():
+    with TestClient(wallet_app) as client:
+        yield client
+
+
+@pytest.fixture(scope="session")
+def bank_client():
+    with TestClient(bank_app) as client:
+        yield client
+
+
+@pytest.fixture(scope="session")
+def store_client():
+    with TestClient(store_app) as client:
+        yield client
+
+
+@pytest.fixture()
+def bank_customer(bank_client):
+    """Cliente del Banco con su cuenta y saldo, y un token con TODOS los scopes.
+
+    Permite que la Persona 1 pruebe cuentas, movimientos y transferencias sin
+    necesitar el flujo OAuth de B2. Depende de `bank_client` para que las tablas
+    ya existan (se crean en el lifespan de la app).
+    """
+    import uuid
+
+    from bank_service.database import SessionLocal
+    from bank_service.deps import ALL_SCOPES, create_bank_token
+    from bank_service.models import Account, BankCustomer
+    from shared.security.passwords import hash_password
+
+    unique = uuid.uuid4().hex
+    email = f"customer-{unique}@example.com"
+    owner_ref = f"wallet-{unique}"
+    account_number = str(uuid.uuid4().int)[:16]
+
+    with SessionLocal() as db:
+        customer = BankCustomer(email=email, password_hash=hash_password("ClaveSegura123"), role="customer")
+        db.add(customer)
+        db.flush()
+        account = Account(
+            owner_ref=owner_ref,
+            customer_id=customer.id,
+            account_number=account_number,
+            balance_cents=100_000,
+        )
+        db.add(account)
+        db.commit()
+        customer_id = customer.id
+        account_id = account.id
+
+    token = create_bank_token(customer_id, ALL_SCOPES)
+    return {
+        "customer_id": customer_id,
+        "email": email,
+        "account_id": account_id,
+        "account_number": account_number,
+        "owner_ref": owner_ref,
+        "token": token,
+        "auth_header": {"Authorization": f"Bearer {token}"},
+    }
+
+=== backend/tests/helpers.py ===
+import uuid
+
+
+def register_and_login(client, password="ClaveSegura123"):
+    email = f"{uuid.uuid4().hex[:10]}@example.com"
+    r = client.post("/auth/register", json={"email": email, "full_name": "Ana Prueba", "password": password})
+    assert r.status_code == 201, r.text
+    r = client.post("/auth/login", json={"email": email, "password": password})
+    assert r.status_code == 200, r.text
+    return email, {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+=== backend/tests/test_bank.py ===
+import secrets
+import time
+
+from shared.schemas import PaymentOrder
+from shared.security.signing import sign, verify
+from tests.conftest import BANK_API_KEY, BANK_PUB, WALLET_PRIV
+
+H = {"X-API-Key": BANK_API_KEY}
+
+
+def signed_order(amount=1000, timestamp=None, priv=WALLET_PRIV, **overrides):
+    order = PaymentOrder(
+        order_id="ord_" + secrets.token_hex(6),
+        merchant="SecureStore",
+        amount_cents=amount,
+        payer="user-test",
+        nonce=secrets.token_hex(16),
+        timestamp=timestamp or int(time.time()),
+        **overrides,
+    )
+    return {"order": order.model_dump(), "signature": sign(priv, order.model_dump())}
+
+
+def test_promotions_are_public(bank_client):
+    r = bank_client.get("/promotions")
+    assert r.status_code == 200 and len(r.json()) >= 1
+
+
+def test_process_requires_api_key(bank_client):
+    assert bank_client.post("/transactions/process", json=signed_order()).status_code == 401
+
+
+def test_process_ok_returns_valid_signed_receipt(bank_client):
+    r = bank_client.post("/transactions/process", json=signed_order(), headers=H)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["receipt"]["status"] == "approved"
+    assert verify(BANK_PUB, data["receipt"], data["signature"])
+
+
+def test_replay_is_rejected(bank_client):
+    payload = signed_order()
+    assert bank_client.post("/transactions/process", json=payload, headers=H).status_code == 200
+    assert bank_client.post("/transactions/process", json=payload, headers=H).status_code == 409
+
+
+def test_tampered_order_is_rejected(bank_client):
+    payload = signed_order(amount=1000)
+    payload["order"]["amount_cents"] = 1
+    assert bank_client.post("/transactions/process", json=payload, headers=H).status_code == 400
+
+
+def test_signature_from_other_key_is_rejected(bank_client):
+    from shared.security.signing import generate_keypair
+
+    other_priv, _ = generate_keypair()
+    payload = signed_order(priv=other_priv)
+    assert bank_client.post("/transactions/process", json=payload, headers=H).status_code == 400
+
+
+def test_expired_order_is_rejected(bank_client):
+    payload = signed_order(timestamp=int(time.time()) - 3600)
+    assert bank_client.post("/transactions/process", json=payload, headers=H).status_code == 400
+
+
+def test_insufficient_funds(bank_client):
+    payload = signed_order(amount=99_999_999)
+    assert bank_client.post("/transactions/process", json=payload, headers=H).status_code == 402
+
+=== backend/tests/test_shared_security.py ===
+import pytest
+from cryptography.exceptions import InvalidTag
+
+from shared.security.crypto import decrypt, encrypt
+from shared.security.hashing import chain_hash, sha256_hex
+from shared.security.passwords import hash_password, verify_password
+from shared.security.signing import generate_keypair, sign, verify
+from shared.validators import luhn_valid
+
+
+def test_password_hash_argon2id_and_verify():
+    h = hash_password("ClaveSegura123")
+    assert h.startswith("$argon2id$")
+    assert verify_password(h, "ClaveSegura123")
+    assert not verify_password(h, "otra-clave")
+
+
+def test_aes_gcm_roundtrip_and_aad_binding():
+    token = encrypt("4111111111111111", aad="user-1")
+    assert "4111" not in token
+    assert decrypt(token, aad="user-1") == "4111111111111111"
+    with pytest.raises(InvalidTag):
+        decrypt(token, aad="user-2")  # ligado a su dueÃ±o
+
+
+def test_two_encryptions_differ_nonce():
+    assert encrypt("hola") != encrypt("hola")
+
+
+def test_sign_and_verify_detects_tampering():
+    priv, pub = generate_keypair()
+    payload = {"amount": 100, "to": "tienda"}
+    sig = sign(priv, payload)
+    assert verify(pub, payload, sig)
+    assert not verify(pub, {"amount": 999, "to": "tienda"}, sig)
+
+
+def test_sha256_and_hash_chain():
+    assert sha256_hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    assert chain_hash("0" * 64, {"a": 1}) != chain_hash("0" * 64, {"a": 2})
+
+
+def test_luhn():
+    assert luhn_valid("4111111111111111")
+    assert not luhn_valid("4111111111111112")
+
+=== backend/tests/test_store.py ===
+from shared.security.signing import verify
+from tests.conftest import BANK_API_KEY, BANK_PUB, WALLET_PUB
+from tests.helpers import register_and_login
+
+
+def test_catalog_has_seed_products(store_client):
+    r = store_client.get("/products")
+    assert r.status_code == 200 and len(r.json()) >= 3
+
+
+def test_full_purchase_flow_wallet_store_bank(wallet_client, store_client, bank_client, monkeypatch):
+    # La Tienda "habla" con el Banco de pruebas en memoria en lugar de la red.
+    monkeypatch.setattr(
+        "store_service.routers.orders.process_payment",
+        lambda payload: bank_client.post("/transactions/process", json=payload, headers={"X-API-Key": BANK_API_KEY}),
+    )
+
+    _, headers = register_and_login(wallet_client)
+    product = store_client.get("/products").json()[0]
+
+    # 1) La app crea la orden en la Tienda
+    order = store_client.post("/orders", json={"items": [{"product_id": product["id"], "quantity": 1}]}).json()
+
+    # 2) La Wallet firma la orden de pago
+    signed = wallet_client.post(
+        "/payments/authorize",
+        json={"order_id": order["order_id"], "merchant": order["merchant"], "amount_cents": order["amount_cents"]},
+        headers=headers,
+    ).json()
+    assert verify(WALLET_PUB, signed["order"], signed["signature"])
+
+    # 3) La Tienda reenvÃ­a al Banco y verifica el recibo firmado
+    r = store_client.post(f"/orders/{order['order_id']}/pay", json=signed)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["status"] == "paid"
+    assert verify(BANK_PUB, data["receipt"], data["signature"])
+
+    # 4) No se puede pagar dos veces la misma orden
+    assert store_client.post(f"/orders/{order['order_id']}/pay", json=signed).status_code == 409
+
+
+def test_pay_rejects_amount_mismatch(wallet_client, store_client):
+    _, headers = register_and_login(wallet_client)
+    product = store_client.get("/products").json()[0]
+    order = store_client.post("/orders", json={"items": [{"product_id": product["id"], "quantity": 1}]}).json()
+    signed = wallet_client.post(
+        "/payments/authorize",
+        json={"order_id": order["order_id"], "merchant": order["merchant"], "amount_cents": 100},
+        headers=headers,
+    ).json()
+    assert store_client.post(f"/orders/{order['order_id']}/pay", json=signed).status_code == 400
+
+=== backend/tests/test_wallet.py ===
+import uuid
+
+from tests.conftest import WALLET_PUB
+from shared.security.signing import verify
+from tests.helpers import register_and_login
+from wallet_service.audit import verify_chain
+from wallet_service.database import SessionLocal
+
+
+def test_register_rejects_weak_password(wallet_client):
+    r = wallet_client.post(
+        "/auth/register",
+        json={"email": f"{uuid.uuid4().hex[:8]}@example.com", "full_name": "Ana", "password": "corta1"},
+    )
+    assert r.status_code == 422
+
+
+def test_login_and_me(wallet_client):
+    email, headers = register_and_login(wallet_client)
+    r = wallet_client.get("/auth/me", headers=headers)
+    assert r.status_code == 200 and r.json()["email"] == email
+
+
+def test_protected_route_requires_token(wallet_client):
+    assert wallet_client.get("/cards").status_code == 401
+
+
+def test_account_lockout_after_failed_attempts(wallet_client):
+    email, _ = register_and_login(wallet_client)
+    for _ in range(5):
+        r = wallet_client.post("/auth/login", json={"email": email, "password": "incorrecta123"})
+        assert r.status_code == 401
+    r = wallet_client.post("/auth/login", json={"email": email, "password": "ClaveSegura123"})
+    assert r.status_code == 423
+
+
+def test_add_card_never_returns_full_number(wallet_client):
+    _, headers = register_and_login(wallet_client)
+    body = {"number": "4111 1111 1111 1111", "holder_name": "Ana Prueba", "exp_month": 12, "exp_year": 2030}
+    r = wallet_client.post("/cards", json=body, headers=headers)
+    assert r.status_code == 201
+    data = r.json()
+    assert data["last4"] == "1111" and data["brand"] == "visa" and data["token"].startswith("tok_")
+    assert "4111111111111111" not in r.text
+    assert len(wallet_client.get("/cards", headers=headers).json()) == 1
+
+
+def test_add_card_rejects_invalid_luhn(wallet_client):
+    _, headers = register_and_login(wallet_client)
+    body = {"number": "4111111111111112", "holder_name": "Ana Prueba", "exp_month": 12, "exp_year": 2030}
+    assert wallet_client.post("/cards", json=body, headers=headers).status_code == 422
+
+
+def test_payment_authorization_is_signed(wallet_client):
+    _, headers = register_and_login(wallet_client)
+    r = wallet_client.post(
+        "/payments/authorize",
+        json={"order_id": "ord_demo", "merchant": "SecureStore", "amount_cents": 5000},
+        headers=headers,
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert verify(WALLET_PUB, data["order"], data["signature"])
+
+
+def test_audit_chain_is_valid_and_detects_tampering(wallet_client):
+    register_and_login(wallet_client)
+    from wallet_service.models import AuditLog
+
+    with SessionLocal() as db:
+        assert verify_chain(db)
+        first = db.get(AuditLog, 1)
+        first.detail = "manipulado"
+        db.commit()
+        assert not verify_chain(db)
+        first.detail = ""
+        db.commit()
+        assert verify_chain(db)
+
+=== backend/wallet_service/__init__.py ===
+
+=== backend/wallet_service/audit.py ===
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from shared.security.hashing import chain_hash
+from shared.timeutil import utcnow
+from wallet_service.models import AuditLog
+
+GENESIS = "0" * 64
+
+
+def _record(event: str, user_id, detail: str, created_at) -> dict:
+    return {
+        "event": event,
+        "user_id": user_id,
+        "detail": detail,
+        "created_at": created_at.isoformat(),
+    }
+
+
+def log_event(db: Session, event: str, user_id: str | None = None, detail: str = "") -> None:
+    """Registra un evento. Nunca guardes contraseÃ±as, PAN ni tokens en `detail`."""
+    last = db.scalars(select(AuditLog).order_by(AuditLog.id.desc())).first()
+    prev_hash = last.hash if last else GENESIS
+    created_at = utcnow()
+    entry = AuditLog(
+        event=event,
+        user_id=user_id,
+        detail=detail,
+        prev_hash=prev_hash,
+        hash=chain_hash(prev_hash, _record(event, user_id, detail, created_at)),
+        created_at=created_at,
+    )
+    db.add(entry)
+    db.commit()
+
+
+def verify_chain(db: Session) -> bool:
+    """True si ningÃºn registro de la bitÃ¡cora fue alterado."""
+    prev_hash = GENESIS
+    for row in db.scalars(select(AuditLog).order_by(AuditLog.id)):
+        expected = chain_hash(prev_hash, _record(row.event, row.user_id, row.detail, row.created_at))
+        if row.prev_hash != prev_hash or row.hash != expected:
+            return False
+        prev_hash = row.hash
+    return True
+
+=== backend/wallet_service/database.py ===
+from sqlalchemy.orm import DeclarativeBase
+
+from shared.config import settings
+from shared.database import make_session_factory
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+engine, SessionLocal = make_session_factory(settings.wallet_database_url)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+=== backend/wallet_service/deps.py ===
+import jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
+
+from shared.security.tokens import decode_access_token
+from wallet_service.database import get_db
+from wallet_service.models import User
+
+bearer = HTTPBearer(auto_error=False)
+
+
+def get_current_user(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: Session = Depends(get_db),
+) -> User:
+    unauthorized = HTTPException(status.HTTP_401_UNAUTHORIZED, "No autenticado")
+    if creds is None:
+        raise unauthorized
+    try:
+        payload = decode_access_token(creds.credentials)
+    except jwt.PyJWTError:
+        raise unauthorized
+    user = db.get(User, payload.get("sub"))
+    if user is None:
+        raise unauthorized
+    return user
+
+=== backend/wallet_service/main.py ===
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+from shared.http import harden_app
+from wallet_service.database import Base, engine
+from wallet_service.routers import auth, cards, payments
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(engine)  # TODO: migrar a Alembic cuando el esquema se estabilice
+    yield
+
+
+app = FastAPI(title="SecureWallet - Wallet Service", version="0.1.0", lifespan=lifespan)
+harden_app(app)
+
+app.include_router(auth.router)
+app.include_router(cards.router)
+app.include_router(payments.router)
+
+
+@app.get("/health", tags=["health"])
+def health():
+    return {"service": "wallet", "status": "ok"}
+
+=== backend/wallet_service/models.py ===
+import uuid
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from shared.timeutil import utcnow
+from wallet_service.database import Base
+
+
+def _uuid() -> str:
+    return uuid.uuid4().hex
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(100))
+    password_hash: Mapped[str] = mapped_column(String(255))
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Card(Base):
+    __tablename__ = "cards"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    token: Mapped[str] = mapped_column(String(40), unique=True)  # lo Ãºnico que circula fuera de la wallet
+    brand: Mapped[str] = mapped_column(String(20))
+    last4: Mapped[str] = mapped_column(String(4))
+    holder_name: Mapped[str] = mapped_column(String(100))
+    exp_month: Mapped[int] = mapped_column(Integer)
+    exp_year: Mapped[int] = mapped_column(Integer)
+    pan_encrypted: Mapped[str] = mapped_column(Text)  # AES-256-GCM; nunca se guarda el CVV
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class AuditLog(Base):
+    """BitÃ¡cora con hashes encadenados para demostrar integridad y no repudio."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event: Mapped[str] = mapped_column(String(50))
+    user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    prev_hash: Mapped[str] = mapped_column(String(64))
+    hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+=== backend/wallet_service/routers/__init__.py ===
+
+=== backend/wallet_service/routers/auth.py ===
+from datetime import timedelta
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from shared.config import settings
+from shared.security.passwords import hash_password, verify_password
+from shared.security.tokens import create_access_token
+from shared.timeutil import utcnow
+from wallet_service.audit import log_event
+from wallet_service.database import get_db
+from wallet_service.deps import get_current_user
+from wallet_service.models import User
+from wallet_service.schemas import LoginIn, RegisterIn, TokenOut, UserOut
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Hash ficticio para igualar tiempos de respuesta cuando el correo no existe.
+_DUMMY_HASH = hash_password("contraseÃ±a-ficticia-1")
+_INVALID = "Credenciales invÃ¡lidas"
+
+
+@router.post("/register", response_model=UserOut, status_code=201)
+def register(body: RegisterIn, db: Session = Depends(get_db)):
+    email = body.email.lower()
+    if db.scalar(select(User).where(User.email == email)):
+        # Mensaje genÃ©rico para no revelar quÃ© correos existen.
+        raise HTTPException(409, "No fue posible completar el registro")
+    user = User(
+        email=email,
+        full_name=body.full_name.strip(),
+        password_hash=hash_password(body.password),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    log_event(db, "register", user.id)
+    return user
+
+
+@router.post("/login", response_model=TokenOut)
+def login(body: LoginIn, db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.email == body.email.lower()))
+
+    if user is None:
+        verify_password(_DUMMY_HASH, body.password)
+        raise HTTPException(401, _INVALID)
+
+    if user.locked_until and user.locked_until > utcnow():
+        log_event(db, "login_blocked", user.id)
+        raise HTTPException(423, "Cuenta bloqueada temporalmente. Intenta mÃ¡s tarde.")
+
+    if not verify_password(user.password_hash, body.password):
+        user.failed_attempts += 1
+        if user.failed_attempts >= settings.max_failed_logins:
+            user.locked_until = utcnow() + timedelta(minutes=settings.lockout_minutes)
+            user.failed_attempts = 0
+            log_event(db, "account_locked", user.id)
+        db.commit()
+        log_event(db, "login_failed", user.id)
+        raise HTTPException(401, _INVALID)
+
+    user.failed_attempts = 0
+    user.locked_until = None
+    db.commit()
+    log_event(db, "login_ok", user.id)
+    return TokenOut(access_token=create_access_token(user.id))
+
+
+@router.get("/me", response_model=UserOut)
+def me(user: User = Depends(get_current_user)):
+    return user
+
+=== backend/wallet_service/routers/cards.py ===
+import re
+import secrets
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from shared.security.crypto import encrypt
+from shared.timeutil import utcnow
+from shared.validators import detect_brand, luhn_valid
+from wallet_service.audit import log_event
+from wallet_service.database import get_db
+from wallet_service.deps import get_current_user
+from wallet_service.models import Card, User
+from wallet_service.schemas import CardIn, CardOut
+
+router = APIRouter(prefix="/cards", tags=["cards"])
+
+
+@router.post("", response_model=CardOut, status_code=201)
+def add_card(body: CardIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    number = re.sub(r"[ -]", "", body.number)
+    if not (number.isdigit() and 13 <= len(number) <= 19 and luhn_valid(number)):
+        raise HTTPException(422, "NÃºmero de tarjeta invÃ¡lido")
+
+    now = utcnow()
+    if (body.exp_year, body.exp_month) < (now.year, now.month):
+        raise HTTPException(422, "La tarjeta estÃ¡ vencida")
+
+    card = Card(
+        user_id=user.id,
+        token="tok_" + secrets.token_hex(12),
+        brand=detect_brand(number),
+        last4=number[-4:],
+        holder_name=body.holder_name.strip(),
+        exp_month=body.exp_month,
+        exp_year=body.exp_year,
+        pan_encrypted=encrypt(number, aad=user.id),  # AES-256-GCM ligado al dueÃ±o
+    )
+    db.add(card)
+    db.commit()
+    db.refresh(card)
+    log_event(db, "card_added", user.id, detail=f"last4={card.last4}")
+    return card
+
+
+@router.get("", response_model=list[CardOut])
+def list_cards(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(Card).where(Card.user_id == user.id)))
+
+
+@router.delete("/{card_id}", status_code=204)
+def delete_card(card_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    card = db.get(Card, card_id)
+    if card is None or card.user_id != user.id:
+        raise HTTPException(404, "Tarjeta no encontrada")
+    db.delete(card)
+    db.commit()
+    log_event(db, "card_deleted", user.id, detail=f"last4={card.last4}")
+
+=== backend/wallet_service/routers/payments.py ===
+import secrets
+import time
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from shared.config import settings
+from shared.schemas import PaymentOrder, SignedOrder
+from shared.security.signing import sign
+from wallet_service.audit import log_event
+from wallet_service.database import get_db
+from wallet_service.deps import get_current_user
+from wallet_service.models import Card, User
+from wallet_service.schemas import PaymentRequest
+
+router = APIRouter(prefix="/payments", tags=["payments"])
+
+
+@router.post("/authorize", response_model=SignedOrder)
+def authorize(body: PaymentRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """La Wallet firma la orden de pago. El Banco verificarÃ¡ esta firma.
+
+    TODO equipo Wallet: exigir re-autenticaciÃ³n (PIN/biometrÃ­a/TOTP) antes de firmar.
+    """
+    card_token = None
+    if body.card_id:
+        card = db.get(Card, body.card_id)
+        if card is None or card.user_id != user.id:
+            raise HTTPException(404, "Tarjeta no encontrada")
+        card_token = card.token
+
+    order = PaymentOrder(
+        order_id=body.order_id,
+        merchant=body.merchant,
+        amount_cents=body.amount_cents,
+        currency=body.currency,
+        payer=user.id,
+        card_token=card_token,
+        nonce=secrets.token_hex(16),
+        timestamp=int(time.time()),
+    )
+    signature = sign(settings.wallet_signing_private_key, order.model_dump())
+    log_event(db, "payment_authorized", user.id, detail=f"order={order.order_id}")
+    return SignedOrder(order=order, signature=signature)
+
+=== backend/wallet_service/schemas.py ===
+import re
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+
+class RegisterIn(BaseModel):
+    email: EmailStr
+    full_name: str = Field(min_length=2, max_length=100)
+    password: str = Field(min_length=10, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if not re.search(r"[A-Za-z]", v) or not re.search(r"\d", v):
+            raise ValueError("La contraseÃ±a debe incluir letras y nÃºmeros")
+        return v
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    email: EmailStr
+    full_name: str
+
+
+class CardIn(BaseModel):
+    number: str = Field(min_length=13, max_length=23)
+    holder_name: str = Field(min_length=2, max_length=100)
+    exp_month: int = Field(ge=1, le=12)
+    exp_year: int = Field(ge=2000, le=2100)
+    # Nota: NO se acepta ni se almacena el CVV.
+
+
+class CardOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    token: str
+    brand: str
+    last4: str
+    holder_name: str
+    exp_month: int
+    exp_year: int
+
+
+class PaymentRequest(BaseModel):
+    order_id: str = Field(min_length=1, max_length=64)
+    merchant: str = Field(min_length=1, max_length=100)
+    amount_cents: int = Field(gt=0, le=100_000_000)
+    currency: str = Field(default="MXN", pattern=r"^[A-Z]{3}$")
+    card_id: str | None = None
+
+=== docker-compose.yml ===
+# Levanta PostgreSQL + los 3 servicios.  Requisito: backend/.env generado
+#   (cd backend && python scripts/generate_env.py)
+# Uso:  docker compose up --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: securewallet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U securewallet"]
+      interval: 5s
+      retries: 10
+
+  wallet:
+    build: ./backend
+    command: uvicorn wallet_service.main:app --host 0.0.0.0 --port 8001
+    env_file: ./backend/.env
+    environment:
+      WALLET_DATABASE_URL: postgresql+psycopg://securewallet:${POSTGRES_PASSWORD:-devpassword}@db:5432/wallet_db
+    ports: ["8001:8001"]
+    depends_on:
+      db: { condition: service_healthy }
+
+  bank:
+    build: ./backend
+    command: uvicorn bank_service.main:app --host 0.0.0.0 --port 8002
+    env_file: ./backend/.env
+    environment:
+      BANK_DATABASE_URL: postgresql+psycopg://securewallet:${POSTGRES_PASSWORD:-devpassword}@db:5432/bank_db
+    ports: ["8002:8002"]
+    depends_on:
+      db: { condition: service_healthy }
+
+  store:
+    build: ./backend
+    command: uvicorn store_service.main:app --host 0.0.0.0 --port 8003
+    env_file: ./backend/.env
+    environment:
+      STORE_DATABASE_URL: postgresql+psycopg://securewallet:${POSTGRES_PASSWORD:-devpassword}@db:5432/store_db
+      BANK_URL: http://bank:8002
+    ports: ["8003:8003"]
+    depends_on:
+      db: { condition: service_healthy }
+      bank: { condition: service_started }
+
+volumes:
+  pgdata:
+
+=== docs/API.md ===
+# Contrato de API (resumen)
+
+La referencia completa y siempre actualizada estÃ¡ en `/docs` de cada servicio (OpenAPI). Si cambias un endpoint, actualiza esta tabla en el mismo PR.
+
+## Wallet â€” `:8001`
+| MÃ©todo | Ruta | Auth | DescripciÃ³n |
+|---|---|---|---|
+| POST | `/auth/register` | â€” | Registro (contraseÃ±a â‰¥ 10, letras y nÃºmeros) |
+| POST | `/auth/login` | â€” | Devuelve JWT. 401 credenciales, 423 cuenta bloqueada |
+| GET | `/auth/me` | JWT | Perfil |
+| POST | `/cards` | JWT | Agrega tarjeta (Luhn, cifrada, devuelve token y last4) |
+| GET | `/cards` | JWT | Lista tarjetas (enmascaradas) |
+| DELETE | `/cards/{id}` | JWT | Elimina tarjeta |
+| POST | `/payments/authorize` | JWT | Devuelve `{order, signature}` firmado por la Wallet |
+
+## Banco â€” `:8002`
+
+Tabla de endpoints del Banco. Es el **contrato base (B0)** entre las dos personas del
+equipo: los marcados como _(pendiente)_ aÃºn no existen y se implementan en la tarea
+indicada. Los tokens del Banco son JWT propios con `aud="bank"`, distintos de los de
+la Wallet, y se envÃ­an como `Authorization: Bearer <token>`.
+
+| MÃ©todo | Ruta | Auth | DescripciÃ³n |
+|---|---|---|---|
+| GET | `/promotions` | â€” | Bonos y promociones activas |
+| GET | `/bank/public-key` | â€” | Clave pÃºblica Ed25519 del Banco |
+| POST | `/transactions/process` | `X-API-Key` | Procesa orden firmada â†’ `{receipt, signature}`. 400 firma/expirada, 402 fondos, 409 repetida |
+| POST | `/oauth/authorize` | aserciÃ³n Wallet | _(pendiente, B2)_ Login + PKCE â†’ `{code, state}`. 400 credenciales/aserciÃ³n, 423 bloqueado |
+| POST | `/oauth/token` | â€” | _(pendiente, B2)_ Canjea `code` + `code_verifier` â†’ `{access_token, scope}`. 400 cÃ³digo invÃ¡lido/usado/expirado |
+| GET | `/accounts/me` | JWT Banco `accounts:read` | _(pendiente, B3)_ Saldo, nÃºmero enmascarado y estado de la cuenta del dueÃ±o del token |
+| GET | `/accounts/me/movements` | JWT Banco `accounts:read` | _(pendiente, B3)_ Movimientos del dueÃ±o (`limit` 1â€“100, `before`). Anti-IDOR |
+| GET | `/promotions/{id}` | â€” | _(pendiente, B4-a)_ Detalle de una promociÃ³n |
+| POST | `/promotions/{id}/redeem` | JWT Banco `promotions:redeem` | _(pendiente, B4-a)_ Canje de un solo uso. 400 vencida, 409 ya canjeada |
+| POST | `/transfers/to-wallet` | JWT Banco `transfers:write` | _(pendiente, B5)_ Recarga a la Wallet â†’ comprobante firmado. Idempotente |
+| POST | `/transfers/from-wallet` | JWT Banco `transfers:write` | _(pendiente, B5)_ Retiro desde la Wallet, verifica comprobante firmado |
+| GET | `/admin/promotions` | JWT Banco admin | _(pendiente, B6)_ Lista promociones incluidas las inactivas. 403 sin rol admin |
+| POST | `/admin/promotions` | JWT Banco admin | _(pendiente, B6)_ Crea promociÃ³n. 422 validaciÃ³n de rangos |
+| PATCH | `/admin/promotions/{id}` | JWT Banco admin | _(pendiente, B6)_ Edita o desactiva promociÃ³n |
+
+## Tienda â€” `:8003`
+| MÃ©todo | Ruta | Auth | DescripciÃ³n |
+|---|---|---|---|
+| GET | `/products`, `/products/{id}` | â€” | CatÃ¡logo |
+| POST | `/orders` | â€” | Crea orden â†’ `{order_id, merchant, amount_cents, currency}` |
+| POST | `/orders/{id}/pay` | â€” | Recibe orden firmada, cobra vÃ­a Banco, verifica recibo |
+| GET | `/orders/{id}` | â€” | Estado de la orden |
+
+> TODO Tienda: asociar Ã³rdenes a usuarios (hoy `/orders` es pÃºblico para simplificar).
+
+=== docs/ARQUITECTURA.md ===
+# Arquitectura
+
+## Componentes
+
+| Componente | TecnologÃ­a | Puerto | Responsabilidad |
+|---|---|---|---|
+| App mÃ³vil | Flutter | â€” | UI de Wallet, Banco y Tienda |
+| Wallet Service | FastAPI + SQLAlchemy | 8001 | Usuarios, sesiones, tarjetas, firma de Ã³rdenes de pago |
+| Bank Service (simulado) | FastAPI | 8002 | Promociones, cuentas, validaciÃ³n de pagos, recibos firmados |
+| Store Service (simulada) | FastAPI | 8003 | CatÃ¡logo, Ã³rdenes, cobro vÃ­a Wallet/Banco |
+| Base de datos | SQLite (dev) / PostgreSQL (docker) | 5432 | Una BD por servicio |
+
+## Llaves y secretos
+
+| Secreto | DÃ³nde vive | Para quÃ© |
+|---|---|---|
+| `JWT_SECRET` | Wallet | Firmar sesiones |
+| `DATA_ENCRYPTION_KEY` | Wallet | Cifrar PAN (AES-256-GCM) |
+| Par Ed25519 **Wallet** | Privada: Wallet Â· PÃºblica: Banco | La Wallet firma Ã³rdenes de pago |
+| Par Ed25519 **Banco** | Privada: Banco Â· PÃºblica: Tienda y App | El Banco firma recibos |
+| `BANK_API_KEY` | Banco y Tienda | AutenticaciÃ³n servicio a servicio (mejorar con mTLS) |
+
+## Flujo de pago
+
+```mermaid
+sequenceDiagram
+    participant A as App Flutter
+    participant T as Tienda
+    participant W as Wallet
+    participant B as Banco
+    A->>T: POST /orders (carrito)
+    T-->>A: order_id, monto, comercio
+    A->>A: BiometrÃ­a (re-autenticaciÃ³n)
+    A->>W: POST /payments/authorize (JWT)
+    W-->>A: orden {nonce, timestamp} + firma Ed25519
+    A->>T: POST /orders/{id}/pay (orden firmada)
+    T->>B: POST /transactions/process (X-API-Key)
+    B->>B: verifica firma, frescura, nonce Ãºnico, fondos
+    B-->>T: recibo + firma Ed25519 del Banco
+    T->>T: verifica firma del recibo
+    T-->>A: pagado + recibo firmado
+    A->>A: (opcional) verifica recibo con ReceiptVerifier
+```
+
+## Controles de seguridad por capa
+
+- **Identidad:** Argon2id, bloqueo por intentos, JWT corto, (pendiente) TOTP 2FA.
+- **Datos en reposo:** AES-256-GCM con AAD = id de usuario; tokenizaciÃ³n de tarjetas.
+- **Integridad y no repudio:** firmas Ed25519 sobre JSON canÃ³nico; bitÃ¡cora con hash encadenado.
+- **Anti-replay:** `nonce` Ãºnico + `timestamp` con ventana de 120 s + UNIQUE en BD.
+- **Transporte:** (pendiente) TLS 1.3, certificate pinning, mTLS entre servicios.
+- **App:** token en Keystore/Keychain; biometrÃ­a para operaciones sensibles.
+
+=== docs/BACKLOG_INICIAL.md ===
+# Backlog inicial por equipo (crear como Issues en GitHub)
+
+Etiquetas sugeridas: `wallet`, `bank`, `store`, `security`, `mobile`, `backend`, `docs`.
+
+## NÃºcleo de seguridad (arquitecto)
+- [ ] Rate limiting (slowapi) en login y pagos
+- [ ] TLS 1.3 local con certificados propios (`mkcert`/OpenSSL) y certificate pinning en Flutter
+- [ ] mTLS Tienda â†” Banco â†” Wallet
+- [ ] RotaciÃ³n de claves y refresh tokens rotativos
+- [ ] Completar `docs/THREAT_MODEL.md` y script de demos de ataque
+
+## Wallet (3)
+- [ ] 2FA TOTP (pyotp ya incluido) + pantalla de activaciÃ³n
+- [ ] Pantalla "Agregar tarjeta" + eliminar + biometrÃ­a antes de ver datos
+- [ ] Re-autenticaciÃ³n obligatoria antes de `/payments/authorize`
+- [ ] Saldo, recargas, historial de transacciones (modelo `Transaction`)
+- [ ] Centro de seguridad: sesiones, dispositivos, bitÃ¡cora visible
+- [ ] RecuperaciÃ³n de contraseÃ±a con enlace firmado de un solo uso
+
+## Banco (3)
+- [ ] Cuentas y movimientos (endpoints + pantallas)
+- [ ] VinculaciÃ³n Wallet â†” Banco con OAuth2 + PKCE (simulado)
+- [ ] Canje de promociones y su efecto en el cobro
+- [ ] Transferencias banco â†” wallet
+- [ ] Panel admin de promociones
+
+## Tienda (2)
+- [ ] Detalle de producto, carrito y cupones
+- [ ] Checkout completo "Pagar con Wallet" (flujo en `docs/ARQUITECTURA.md`)
+- [ ] Ã“rdenes ligadas a usuario + historial de pedidos con recibo verificable
+- [ ] Panel admin de productos
+
+=== docs/SITEMAP.md ===
+# Mapa de sitio (pantallas)
+
+Estado: âœ… ya existe en el esqueleto Â· ðŸ”² por construir
+
+## Acceso
+- âœ… Login Â· âœ… Registro Â· ðŸ”² Splash + verificaciÃ³n root/jailbreak Â· ðŸ”² Onboarding Â· ðŸ”² VerificaciÃ³n OTP Â· ðŸ”² Configurar PIN/biometrÃ­a Â· ðŸ”² 2FA (TOTP) Â· ðŸ”² Recuperar contraseÃ±a Â· ðŸ”² Cuenta bloqueada
+
+## Wallet (Equipo Wallet)
+- ðŸ”² Dashboard (saldo, accesos rÃ¡pidos, alertas)
+- âœ… Lista de tarjetas Â· ðŸ”² Agregar / detalle (con biometrÃ­a) / editar / bloquear / predeterminada
+- ðŸ”² Cuentas bancarias vinculadas (lista, vincular, desvincular)
+- ðŸ”² Enviar Â· Recibir (QR firmado) Â· Recargar Â· Retirar Â· ConfirmaciÃ³n + comprobante firmado
+- ðŸ”² Historial (filtros, detalle, verificar comprobante, exportar PDF firmado) Â· ðŸ”² Contactos
+
+## Banco (Equipo Banco)
+- âœ… Promociones Â· ðŸ”² Detalle y canje de promociÃ³n Â· ðŸ”² Resumen de cuentas y movimientos
+- ðŸ”² Transferencias banco â†” wallet Â· ðŸ”² Notificaciones Â· ðŸ”² Panel admin (opcional)
+
+## Tienda (Equipo Tienda)
+- âœ… CatÃ¡logo Â· ðŸ”² Detalle Â· ðŸ”² BÃºsqueda/filtros Â· ðŸ”² Carrito + cupones
+- ðŸ”² Checkout "Pagar con Wallet" (autorizaciÃ³n biomÃ©trica) Â· ðŸ”² ConfirmaciÃ³n/error
+- ðŸ”² Mis pedidos + recibo firmado Â· ðŸ”² Panel admin (opcional)
+
+## Seguridad y perfil (Equipo Wallet + arquitecto)
+- ðŸ”² Perfil Â· cambiar contraseÃ±a/PIN
+- ðŸ”² Centro de seguridad: 2FA, biometrÃ­a, dispositivos/sesiones, bitÃ¡cora de accesos, lÃ­mites, bloqueo de emergencia
+- ðŸ”² ConfiguraciÃ³n, privacidad (exportar/eliminar cuenta), ayuda Â· âœ… Cerrar sesiÃ³n Â· ðŸ”² Cierre por inactividad
+- ðŸ”² Pantallas de apoyo: sin conexiÃ³n, error, sesiÃ³n expirada, mantenimiento, actualizaciÃ³n obligatoria
+
+=== docs/THREAT_MODEL.md ===
+# Modelo de amenazas (STRIDE) â€” punto de partida
+
+Completar y mantener durante el proyecto. Cada fila debe terminar enlazada a una prueba o a una demo.
+
+| STRIDE | Amenaza | Activo | Control actual | Pendiente / Demo |
+|---|---|---|---|---|
+| **S**poofing | Robo de credenciales / fuerza bruta | Cuenta de usuario | Argon2id, bloqueo tras 5 intentos | 2FA TOTP, rate limiting por IP |
+| **S**poofing | Falsificar una orden de pago | Pagos | Firma Ed25519 de la Wallet | Demo: orden con firma ajena â†’ 400 |
+| **T**ampering | Alterar el monto de una orden | Pagos | Firma sobre JSON canÃ³nico | Demo: cambiar `amount_cents` â†’ 400 |
+| **T**ampering | Alterar la bitÃ¡cora | AuditorÃ­a | Hash encadenado | Demo: editar un registro â†’ `verify_chain` falla |
+| **R**epudiation | "Yo no hice ese pago" | Pagos | Orden firmada + recibo firmado + bitÃ¡cora | Exportar comprobante verificable |
+| **I**nfo disclosure | Fuga de la BD con tarjetas | PAN | AES-256-GCM, tokenizaciÃ³n, sin CVV | RotaciÃ³n de claves, Vault |
+| **I**nfo disclosure | IntercepciÃ³n en la red (MITM) | TrÃ¡fico | (pendiente) TLS 1.3 | Certificate pinning + demo con mitmproxy |
+| **D**enial of service | Inundar login/pagos | Disponibilidad | â€” | Rate limiting, lÃ­mites de tamaÃ±o |
+| **E**levation | Acceder a tarjetas de otro usuario | Datos | ValidaciÃ³n de dueÃ±o en cada consulta | Pruebas de autorizaciÃ³n (IDOR) |
+| **E**levation | Tienda llamando al Banco sin permiso | Banco | `X-API-Key` | mTLS |
+| Replay | Reenviar una orden capturada | Pagos | nonce + timestamp + UNIQUE | Demo: reenvÃ­o â†’ 409 |
+
+=== mobile/README.md ===
+# App mÃ³vil (Flutter)
+
+Una sola app con tres mÃ³dulos en `lib/features/` (wallet, bank, store) y un nÃºcleo compartido en `lib/core/`.
+
+## Primer arranque
+
+El repositorio incluye `lib/`, `test/` y `pubspec.yaml`. Las carpetas de plataforma (`android/`, `ios/`) las genera Flutter:
+
+## Ejecutar contra el backend local
+
+```bash
+
+# TelÃ©fono fÃ­sico en la misma red Wi-Fi
+flutter run --dart-define=WALLET_URL=http://IP_DE_TU_PC:8001 \
+            --dart-define=BANK_URL=http://IP_DE_TU_PC:8002 \
+            --dart-define=STORE_URL=http://IP_DE_TU_PC:8003
+```
+
+## Estructura
+
+```
+lib/
+â”œâ”€â”€ main.dart, app.dart
+â”œâ”€â”€ core/                 # Lo toca solo el arquitecto de seguridad (PR revisado)
+â”‚   â”œâ”€â”€ config/           # URLs de servicios
+â”‚   â”œâ”€â”€ network/          # Dio + token JWT
+â”‚   â”œâ”€â”€ security/         # almacenamiento seguro, biometrÃ­a, verificaciÃ³n de firmas
+â”‚   â””â”€â”€ theme/
+â””â”€â”€ features/
+    â”œâ”€â”€ wallet/           # Equipo Wallet  (login, registro, tarjetas, ...)
+    â”œâ”€â”€ bank/             # Equipo Banco   (promociones, cuentas, ...)
+    â””â”€â”€ store/            # Equipo Tienda  (catÃ¡logo, carrito, checkout)
+```
+
+=== mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md ===
+# Launch Screen Assets
+
+You can customize the launch screen with your own desired assets by replacing the image files in this directory.
+
+You can also do it by opening your Flutter project's Xcode project with `open ios/Runner.xcworkspace`, selecting `Runner/Assets.xcassets` in the Project Navigator and dropping in the desired images.
+
+=== mobile/lib/app.dart ===
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'core/router.dart';
+import 'core/theme/app_theme.dart';
+
+class SecureWalletApp extends ConsumerWidget {
+  const SecureWalletApp({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return MaterialApp.router(
+      title: 'SecureWallet',
+      theme: AppTheme.light,
+      routerConfig: appRouter,
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+=== mobile/lib/core/config/app_config.dart ===
+/// URLs de los servicios. Desde el emulador de Android, el localhost del PC es 10.0.2.2.
+/// Para otro entorno:  flutter run --dart-define=WALLET_URL=https://...
+class AppConfig {
+  static const walletUrl =
+      String.fromEnvironment('WALLET_URL', defaultValue: 'http://10.0.2.2:8001');
+  static const bankUrl =
+      String.fromEnvironment('BANK_URL', defaultValue: 'http://10.0.2.2:8002');
+  static const storeUrl =
+      String.fromEnvironment('STORE_URL', defaultValue: 'http://10.0.2.2:8003');
+}
+
+=== mobile/lib/core/network/api_client.dart ===
+import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../config/app_config.dart';
+import '../security/secure_storage.dart';
+
+/// Crea un cliente HTTP. Si `auth` es true, agrega el token JWT guardado de forma segura.
+///
+/// TODO equipo de seguridad: certificate pinning (comparar el hash del certificado del
+/// servidor) y rechazar HTTP en producciÃ³n.
+Dio buildDio(String baseUrl, SecureStore store, {bool auth = false}) {
+  final dio = Dio(
+    BaseOptions(
+      baseUrl: baseUrl,
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 15),
+      headers: {'Accept': 'application/json'},
+    ),
+  );
+  if (auth) {
+    dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final token = await store.readToken();
+          if (token != null) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+          handler.next(options);
+        },
+      ),
+    );
+  }
+  return dio;
+}
+
+/// Convierte un error de Dio en un mensaje legible para el usuario.
+String errorMessage(Object error) {
+  if (error is DioException) {
+    final data = error.response?.data;
+    if (data is Map && data['detail'] is String) {
+      return data['detail'] as String;
+    }
+    if (error.type == DioExceptionType.connectionError ||
+        error.type == DioExceptionType.connectionTimeout) {
+      return 'No se pudo conectar con el servidor';
+    }
+  }
+  return 'OcurriÃ³ un error inesperado';
+}
+
+final walletDioProvider = Provider<Dio>(
+  (ref) => buildDio(AppConfig.walletUrl, ref.watch(secureStoreProvider), auth: true),
+);
+final bankDioProvider = Provider<Dio>(
+  (ref) => buildDio(AppConfig.bankUrl, ref.watch(secureStoreProvider)),
+);
+final storeDioProvider = Provider<Dio>(
+  (ref) => buildDio(AppConfig.storeUrl, ref.watch(secureStoreProvider)),
+);
+
+=== mobile/lib/core/router.dart ===
+import 'package:go_router/go_router.dart';
+
+import '../features/wallet/presentation/home_page.dart';
+import '../features/wallet/presentation/login_page.dart';
+import '../features/wallet/presentation/register_page.dart';
+
+
+/// TODO equipo Wallet: agregar `redirect` para mandar a /login si no hay token guardado.
+final appRouter = GoRouter(
+  initialLocation: '/login',
+  routes: [
+    GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
+    GoRoute(path: '/register', builder: (context, state) => const RegisterPage()),
+    GoRoute(path: '/home', builder: (context, state) => const HomePage()),
+  ],
+);
+
+=== mobile/lib/core/security/biometric_service.dart ===
+import 'package:local_auth/local_auth.dart';
+
+/// Re-autenticaciÃ³n con huella/rostro/PIN del dispositivo.
+/// Ãšsala antes de operaciones sensibles (ver tarjeta, firmar un pago).
+class BiometricService {
+  final LocalAuthentication _auth = LocalAuthentication();
+
+  Future<bool> isAvailable() async {
+    final canCheck = await _auth.canCheckBiometrics;
+    final supported = await _auth.isDeviceSupported();
+    return canCheck || supported;
+  }
+
+  Future<bool> authenticate(String reason) async {
+    try {
+      return await _auth.authenticate(
+        localizedReason: reason,
+        persistAcrossBackgrounding: true,
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+=== mobile/lib/core/security/receipt_verifier.dart ===
+import 'dart:convert';
+
+import 'package:cryptography/cryptography.dart';
+
+/// JSON canÃ³nico: llaves ordenadas y sin espacios. Debe producir exactamente los mismos
+/// bytes que `canonical_json` del backend (backend/shared/security/signing.py).
+String canonicalJson(Object? value) => jsonEncode(_sortKeys(value));
+
+Object? _sortKeys(Object? value) {
+  if (value is Map) {
+    final keys = value.keys.map((k) => k.toString()).toList()..sort();
+    return {for (final k in keys) k: _sortKeys(value[k])};
+  }
+  if (value is List) {
+    return value.map(_sortKeys).toList();
+  }
+  return value;
+}
+
+/// Verifica firmas Ed25519 (p. ej. el recibo firmado por el Banco).
+class ReceiptVerifier {
+  final Ed25519 _algorithm = Ed25519();
+
+  Future<bool> verify({
+    required Map<String, dynamic> payload,
+    required String signatureB64,
+    required String publicKeyB64,
+  }) async {
+    final signature = Signature(
+      base64Url.decode(signatureB64),
+      publicKey: SimplePublicKey(base64Url.decode(publicKeyB64), type: KeyPairType.ed25519),
+    );
+    return _algorithm.verify(utf8.encode(canonicalJson(payload)), signature: signature);
+  }
+}
+
+=== mobile/lib/core/security/secure_storage.dart ===
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+/// Guarda secretos en Android Keystore / iOS Keychain (nunca en SharedPreferences).
+class SecureStore {
+  SecureStore([FlutterSecureStorage? storage])
+      : _storage = storage ?? const FlutterSecureStorage();
+
+  final FlutterSecureStorage _storage;
+  static const _tokenKey = 'access_token';
+
+  Future<void> saveToken(String token) => _storage.write(key: _tokenKey, value: token);
+  Future<String?> readToken() => _storage.read(key: _tokenKey);
+  Future<void> clear() => _storage.deleteAll();
+}
+
+final secureStoreProvider = Provider<SecureStore>((ref) => SecureStore());
+
+=== mobile/lib/core/theme/app_theme.dart ===
+import 'package:flutter/material.dart';
+
+/// Tema global azul + amarillo (misma paleta que features/wallet/presentation/theme).
+class AppTheme {
+  static const Color _blue = Color(0xFF1B5FD0);
+  static const Color _navy = Color(0xFF0B2A6B);
+  static const Color _yellow = Color(0xFFFFC21A);
+  static const Color _ink = Color(0xFF0F1F3D);
+  static const Color _background = Color(0xFFF4F7FD);
+
+  static final ThemeData light = ThemeData(
+    useMaterial3: true,
+    colorScheme: ColorScheme.fromSeed(seedColor: _blue).copyWith(
+      primary: _blue,
+      onPrimary: Colors.white,
+      secondary: _yellow,
+      onSecondary: _ink,
+    ),
+    scaffoldBackgroundColor: _background,
+    appBarTheme: const AppBarTheme(
+      backgroundColor: _navy,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      centerTitle: false,
+    ),
+    inputDecorationTheme: const InputDecorationTheme(border: OutlineInputBorder()),
+  );
+}
+
+=== mobile/lib/features/bank/presentation/bank_page.dart ===
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/network/api_client.dart';
+
+final promotionsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
+  final res = await ref.watch(bankDioProvider).get('/promotions');
+  return res.data as List<dynamic>;
+});
+
+/// TODO equipo Banco: vincular cuenta (OAuth2 simulado), saldo, movimientos, canjear promociones.
+class BankPage extends ConsumerWidget {
+  const BankPage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final promotions = ref.watch(promotionsProvider);
+    return promotions.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text(errorMessage(e))),
+      data: (items) => ListView(
+        children: [
+          for (final p in items)
+            ListTile(
+              leading: const Icon(Icons.local_offer),
+              title: Text('${p['title']}'),
+              subtitle: Text('${p['description']}'),
+              trailing: Text('${p['discount_percent']}%'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+=== mobile/lib/features/store/presentation/store_page.dart ===
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/network/api_client.dart';
+
+final productsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
+  final res = await ref.watch(storeDioProvider).get('/products');
+  return res.data as List<dynamic>;
+});
+
+String formatPrice(int cents) => '\$${(cents / 100).toStringAsFixed(2)}';
+
+/// TODO equipo Tienda: carrito y checkout "Pagar con Wallet":
+///   1) POST {store}/orders   2) POST {wallet}/payments/authorize (con biometrÃ­a)
+///   3) POST {store}/orders/{id}/pay   4) verificar el recibo con ReceiptVerifier.
+class StorePage extends ConsumerWidget {
+  const StorePage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final products = ref.watch(productsProvider);
+    return products.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(child: Text(errorMessage(e))),
+      data: (items) => ListView(
+        children: [
+          for (final p in items)
+            ListTile(
+              leading: const Icon(Icons.shopping_bag),
+              title: Text('${p['name']}'),
+              subtitle: Text('${p['description']}'),
+              trailing: Text(formatPrice(p['price_cents'] as int)),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+=== mobile/lib/features/wallet/data/auth_repository.dart ===
+import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/network/api_client.dart';
+import '../../../core/security/secure_storage.dart';
+import 'wallet_models.dart';
+
+class AuthRepository {
+  AuthRepository(this._dio, this._store);
+
+  final Dio _dio;
+  final SecureStore _store;
+
+  Future<void> register({
+    required String email,
+    required String fullName,
+    required String password,
+  }) async {
+    await _dio.post<dynamic>('/auth/register', data: {
+      'email': email,
+      'full_name': fullName,
+      'password': password,
+    });
+  }
+
+  Future<void> login(String email, String password) async {
+    final res = await _dio.post<dynamic>(
+      '/auth/login',
+      data: {'email': email, 'password': password},
+    );
+    await _store.saveToken(res.data['access_token'] as String);
+  }
+
+  /// Datos del usuario autenticado (GET /auth/me).
+  Future<UserProfile> fetchProfile() async {
+    final res = await _dio.get<dynamic>('/auth/me');
+    return UserProfile.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  /// true si hay un token guardado en el almacÃ©n seguro del telÃ©fono.
+  Future<bool> hasSession() async => (await _store.readToken()) != null;
+
+  Future<void> logout() => _store.clear();
+}
+
+final authRepositoryProvider = Provider<AuthRepository>(
+  (ref) => AuthRepository(ref.watch(walletDioProvider), ref.watch(secureStoreProvider)),
+);
+
+final profileProvider = FutureProvider.autoDispose<UserProfile>(
+  (ref) => ref.watch(authRepositoryProvider).fetchProfile(),
+);
+
+=== mobile/lib/features/wallet/presentation/cards_page.dart ===
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../core/network/api_client.dart';
+import '../data/cards_repository.dart';
+import 'theme/wallet_palette.dart';
+import 'widgets/credit_card_view.dart';
+import 'widgets/wallet_widgets.dart';
+
+/// PestaÃ±a "Tarjetas": lista de tarjetas reales (GET /cards) como tarjetas visuales.
+class CardsPage extends ConsumerWidget {
+  const CardsPage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cards = ref.watch(cardsProvider);
+    final blocked = ref.watch(blockedCardsProvider);
+    final defaultId = ref.watch(defaultCardIdProvider);
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/cards/add'),
+        backgroundColor: WalletColors.yellow,
+        foregroundColor: WalletColors.ink,
+        icon: const Icon(Icons.add_card_rounded),
+        label: const Text('Agregar tarjeta', style: TextStyle(fontWeight: FontWeight.w800)),
+      ),
+      body: RefreshIndicator(
+        color: WalletColors.blue,
+        onRefresh: () async {
+          ref.invalidate(cardsProvider);
+          await Future<void>.delayed(const Duration(milliseconds: 400));
+        },
+        child: cards.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              InfoBanner(kind: BannerKind.danger, text: errorMessage(e)),
+              const SizedBox(height: 12),
+              const Text('Desliza hacia abajo para reintentar.', style: WalletText.muted),
+            ],
+          ),
+          data: (list) {
+            if (list.isEmpty) {
+              return ListView(
+                children: [
+                  const SizedBox(height: 60),
+                  EmptyState(
+                    icon: Icons.credit_card_off_rounded,
+                    title: 'AÃºn no tienes tarjetas',
+                    message: 'Agrega una tarjeta para recargar saldo y pagar. Se guarda cifrada y nunca pedimos el CVV.',
+                    actionLabel: 'Agregar tarjeta',
+                    onAction: () => context.push('/cards/add'),
+                  ),
+                ],
+              );
+            }
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
+              children: [
+                const InfoBanner(
+                  icon: Icons.verified_user_rounded,
+                  text: 'Tus tarjetas se guardan cifradas (AES-256). Nunca guardamos el CVV.',
+                ),
+                const SizedBox(height: 16),
+                for (final card in list) ...[
+                  GestureDetector(
+                    onTap: () => context.push('/cards/detail', extra: card),
+                    child: CreditCardView(
+                      brand: card.brand,
+                      holder: card.holderName,
+                      expiry: card.expiry,
+                      last4: card.last4,
+                      blocked: blocked.contains(card.id),
+                      isDefault: defaultId == card.id,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text('${card.brandLabel} â€¢â€¢â€¢â€¢ ${card.last4}', style: WalletText.h3),
+                      const Spacer(),
+                      if (defaultId == card.id) const StatusChip(label: 'Predeterminada', color: WalletColors.yellowDark, icon: Icons.star_rounded),
+                      if (blocked.contains(card.id)) const StatusChip(label: 'Bloqueada', color: WalletColors.danger, icon: Icons.lock_rounded),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+=== mobile/lib/features/wallet/presentation/home_page.dart ===
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../bank/presentation/bank_page.dart';
+import '../../store/presentation/store_page.dart';
+import 'cards_page.dart';
+import 'dashboard_page.dart';
+import 'profile_page.dart';
+import 'theme/wallet_palette.dart';
+
+/// PestaÃ±a activa de la barra inferior. Otras pantallas pueden cambiarla con
+class HomeTabNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void select(int index) {
+    state = index;
+  }
+}
+
+final homeTabProvider = NotifierProvider<HomeTabNotifier, int>(HomeTabNotifier.new);
+
+class HomePage extends ConsumerWidget {
+  const HomePage({super.key});
+
+  static const _titles = ['Inicio', 'Mis tarjetas', 'Banco', 'Tienda', 'Mi perfil'];
+  static const _pages = <Widget>[
+    DashboardPage(),
+    CardsPage(),
+    BankPage(),
+    StorePage(),
+    ProfilePage(),
+  ];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final index = ref.watch(homeTabProvider);
+    return Scaffold(
+      backgroundColor: WalletColors.background,
+      appBar: index == 0
+          ? null
+          : AppBar(
+              backgroundColor: WalletColors.navy,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              centerTitle: false,
+              title: Text(_titles[index], style: const TextStyle(fontWeight: FontWeight.w800)),
+              actions: [
+                IconButton(
+                  tooltip: 'Notificaciones',
+                  icon: const Icon(Icons.notifications_rounded),
+                  onPressed: () => context.push('/notifications'),
+                ),
+              ],
+            ),
+      body: _pages[index],
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: index,
+        backgroundColor: Colors.white,
+        indicatorColor: WalletColors.yellow,
+        onDestinationSelected: (i) => ref.read(homeTabProvider.notifier).select(i),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded, color: WalletColors.navy),
+            label: 'Inicio',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.credit_card_outlined),
+            selectedIcon: Icon(Icons.credit_card_rounded, color: WalletColors.navy),
+            label: 'Tarjetas',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.account_balance_outlined),
+            selectedIcon: Icon(Icons.account_balance_rounded, color: WalletColors.navy),
+            label: 'Banco',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.storefront_outlined),
+            selectedIcon: Icon(Icons.storefront_rounded, color: WalletColors.navy),
+            label: 'Tienda',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline_rounded),
+            selectedIcon: Icon(Icons.person_rounded, color: WalletColors.navy),
+            label: 'Perfil',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+=== mobile/lib/features/wallet/presentation/login_page.dart ===
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../core/network/api_client.dart';
+import '../../../core/security/biometric_service.dart';
+import '../data/auth_repository.dart';
+import 'theme/wallet_palette.dart';
+import 'widgets/wallet_widgets.dart';
+
+class LoginPage extends ConsumerStatefulWidget {
+  const LoginPage({super.key});
+
+  @override
+  ConsumerState<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends ConsumerState<LoginPage> {
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  final _biometric = BiometricService();
+  bool _loading = false;
+  bool _obscure = true;
+  String? _error;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final email = _email.text.trim();
+    if (email.isEmpty || _password.text.isEmpty) {
+      setState(() => _error = 'Escribe tu correo y tu contraseÃ±a');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await ref.read(authRepositoryProvider).login(email, _password.text);
+      if (!mounted) return;
+      context.go('/home');
+    } catch (e) {
+      if (mounted) setState(() => _error = errorMessage(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Entrada rÃ¡pida con huella: solo funciona si ya hay una sesiÃ³n vigente en el telÃ©fono.
+  Future<void> _biometricLogin() async {
+    final repo = ref.read(authRepositoryProvider);
+    if (!await repo.hasSession()) {
+      if (mounted) {
+        showWalletSnack(context, 'Inicia sesiÃ³n una vez con tu contraseÃ±a para usar la huella.', error: true);
+      }
+      return;
+    }
+    if (!await _biometric.isAvailable()) {
+      if (mounted) {
+        showWalletSnack(context, 'Tu telÃ©fono no tiene huella ni bloqueo de pantalla.', error: true);
+      }
+      return;
+    }
+    final ok = await _biometric.authenticate('Confirma tu identidad para entrar a SecureWallet');
+    if (!ok || !mounted) return;
+    try {
+      await repo.fetchProfile();
+      if (!mounted) return;
+      context.go('/home');
+    } catch (_) {
+      if (mounted) {
+        showWalletSnack(context, 'Tu sesiÃ³n expirÃ³. Ingresa con tu contraseÃ±a.', error: true);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: WalletColors.background,
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            GradientHeader(
+              padding: const EdgeInsets.fromLTRB(24, 72, 24, 64),
+              child: Column(
+                children: [
+                  const WalletLogo(size: 76),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'SecureWallet',
+                    style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Tu dinero, protegido',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 14),
+                  ),
+                ],
+              ),
+            ),
+            Transform.translate(
+              offset: const Offset(0, -32),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    SoftCard(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text('Iniciar sesiÃ³n', style: WalletText.h2),
+                          const SizedBox(height: 4),
+                          const Text('Ingresa a tu cuenta para continuar', style: WalletText.muted),
+                          const SizedBox(height: 20),
+                          WalletTextField(
+                            controller: _email,
+                            label: 'Correo electrÃ³nico',
+                            icon: Icons.email_rounded,
+                            keyboardType: TextInputType.emailAddress,
+                            textInputAction: TextInputAction.next,
+                            autofillHints: const [AutofillHints.email],
+                          ),
+                          const SizedBox(height: 14),
+                          WalletTextField(
+                            controller: _password,
+                            label: 'ContraseÃ±a',
+                            icon: Icons.lock_rounded,
+                            obscure: _obscure,
+                            textInputAction: TextInputAction.done,
+                            suffix: IconButton(
+                              tooltip: _obscure ? 'Mostrar contraseÃ±a' : 'Ocultar contraseÃ±a',
+                              icon: Icon(_obscure ? Icons.visibility_rounded : Icons.visibility_off_rounded),
+                              onPressed: () => setState(() => _obscure = !_obscure),
+                            ),
+                          ),
+                          if (_error != null) ...[
+                            const SizedBox(height: 12),
+                            InfoBanner(text: _error!, kind: BannerKind.danger),
+                          ],
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () => context.push('/forgot'),
+                              child: const Text('Â¿Olvidaste tu contraseÃ±a?'),
+                            ),
+                          ),
+                          PrimaryButton(
+                            label: 'Entrar',
+                            icon: Icons.login_rounded,
+                            loading: _loading,
+                            onPressed: _submit,
+                          ),
+                          const SizedBox(height: 12),
+                          SecondaryButton(
+                            label: 'Entrar con huella',
+                            icon: Icons.fingerprint_rounded,
+                            onPressed: _biometricLogin,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton.icon(
+                      onPressed: () => context.go('/register'),
+                      icon: const Icon(Icons.person_add_alt_1_rounded),
+                      label: const Text('Crear cuenta'),
+                    ),
+                    const SizedBox(height: 4),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.lock_rounded, size: 14, color: WalletColors.muted),
+                        SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            'Tu contraseÃ±a nunca se guarda en este telÃ©fono',
+                            textAlign: TextAlign.center,
+                            style: WalletText.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+=== mobile/lib/features/wallet/presentation/register_page.dart ===
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../core/network/api_client.dart';
+import '../data/auth_repository.dart';
+import 'theme/wallet_palette.dart';
+import 'widgets/wallet_widgets.dart';
+
+class RegisterPage extends ConsumerStatefulWidget {
+  const RegisterPage({super.key});
+
+  @override
+  ConsumerState<RegisterPage> createState() => _RegisterPageState();
+}
+
+class _RegisterPageState extends ConsumerState<RegisterPage> {
+  final _name = TextEditingController();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _obscure = true;
+  bool _accepted = false;
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _password.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  bool get _hasLength => _password.text.length >= 10;
+  bool get _hasLetter => RegExp(r'[A-Za-z]').hasMatch(_password.text);
+  bool get _hasDigit => RegExp(r'\d').hasMatch(_password.text);
+  bool get _hasSymbol => RegExp(r'[^A-Za-z0-9]').hasMatch(_password.text);
+
+  /// 0 a 4 segÃºn los requisitos cumplidos.
+  int get _strength => [_hasLength, _hasLetter, _hasDigit, _hasSymbol].where((e) => e).length;
+
+  bool get _passwordOk => _hasLength && _hasLetter && _hasDigit;
+
+  bool get _canSubmit =>
+      _name.text.trim().length >= 2 &&
+      _email.text.contains('@') &&
+      _passwordOk &&
+      _password.text == _confirm.text &&
+      _accepted;
+
+  Future<void> _submit() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final repo = ref.read(authRepositoryProvider);
+      await repo.register(
+        email: _email.text.trim(),
+        fullName: _name.text.trim(),
+        password: _password.text,
+      );
+      await repo.login(_email.text.trim(), _password.text);
+      if (!mounted) return;
+      context.go('/onboarding');
+    } catch (e) {
+      if (mounted) setState(() => _error = errorMessage(e));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Widget _rule(bool ok, String text) => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Row(
+          children: [
+            Icon(
+              ok ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+              size: 16,
+              color: ok ? WalletColors.success : WalletColors.muted,
+            ),
+            const SizedBox(width: 8),
+            Text(text, style: WalletText.muted.copyWith(color: ok ? WalletColors.ink : WalletColors.muted)),
+          ],
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = ['Muy dÃ©bil', 'DÃ©bil', 'Media', 'Buena', 'Fuerte'];
+    final colors = [
+      WalletColors.danger,
+      WalletColors.danger,
+      WalletColors.yellowDark,
+      WalletColors.blue,
+      WalletColors.success,
+    ];
+    final strength = _password.text.isEmpty ? 0 : _strength;
+    return Scaffold(
+      backgroundColor: WalletColors.background,
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            GradientHeader(
+              padding: const EdgeInsets.fromLTRB(8, 40, 24, 48),
+              child: Row(
+                children: [
+                  IconButton(
+                    onPressed: () => context.go('/login'),
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
+                  ),
+                  const SizedBox(width: 4),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Crear cuenta', style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900)),
+                        SizedBox(height: 4),
+                        Text('Solo toma un minuto', style: TextStyle(color: WalletColors.yellow, fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                  const WalletLogo(size: 48),
+                ],
+              ),
+            ),
+            Transform.translate(
+              offset: const Offset(0, -24),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: SoftCard(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      WalletTextField(
+                        controller: _name,
+                        label: 'Nombre completo',
+                        icon: Icons.badge_rounded,
+                        textCapitalization: TextCapitalization.words,
+                        textInputAction: TextInputAction.next,
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 14),
+                      WalletTextField(
+                        controller: _email,
+                        label: 'Correo electrÃ³nico',
+                        icon: Icons.email_rounded,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 14),
+                      WalletTextField(
+                        controller: _password,
+                        label: 'ContraseÃ±a',
+                        icon: Icons.lock_rounded,
+                        obscure: _obscure,
+                        textInputAction: TextInputAction.next,
+                        onChanged: (_) => setState(() {}),
+                        suffix: IconButton(
+                          icon: Icon(_obscure ? Icons.visibility_rounded : Icons.visibility_off_rounded),
+                          onPressed: () => setState(() => _obscure = !_obscure),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: LinearProgressIndicator(
+                                value: strength / 4,
+                                minHeight: 8,
+                                backgroundColor: WalletColors.line,
+                                color: colors[strength],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            labels[strength],
+                            style: TextStyle(fontWeight: FontWeight.w800, color: colors[strength], fontSize: 12),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      _rule(_hasLength, 'MÃ­nimo 10 caracteres'),
+                      _rule(_hasLetter, 'Incluye letras'),
+                      _rule(_hasDigit, 'Incluye nÃºmeros'),
+                      _rule(_hasSymbol, 'Un sÃ­mbolo la hace mÃ¡s fuerte (opcional)'),
+                      const SizedBox(height: 14),
+                      WalletTextField(
+                        controller: _confirm,
+                        label: 'Confirmar contraseÃ±a',
+                        icon: Icons.lock_reset_rounded,
+                        obscure: _obscure,
+                        onChanged: (_) => setState(() {}),
+                        errorText: _confirm.text.isNotEmpty && _confirm.text != _password.text
+                            ? 'Las contraseÃ±as no coinciden'
+                            : null,
+                      ),
+                      const SizedBox(height: 8),
+                      CheckboxListTile(
+                        value: _accepted,
+                        onChanged: (v) => setState(() => _accepted = v ?? false),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: const Text(
+                          'Acepto los tÃ©rminos y el aviso de privacidad',
+                          style: WalletText.body,
+                        ),
+                      ),
+                      if (_error != null) ...[
+                        InfoBanner(text: _error!, kind: BannerKind.danger),
+                        const SizedBox(height: 12),
+                      ],
+                      PrimaryButton(
+                        label: 'Registrarme',
+                        icon: Icons.check_rounded,
+                        loading: _loading,
+                        onPressed: _canSubmit ? _submit : null,
+                      ),
+                      const SizedBox(height: 4),
+                      TextButton(
+                        onPressed: () => context.go('/login'),
+                        child: const Text('Ya tengo cuenta'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+=== mobile/lib/main.dart ===
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'app.dart';
+
+void main() {
+  runApp(const ProviderScope(child: SecureWalletApp()));
+}
+
+=== mobile/test/security/canonical_json_test.dart ===
+import 'package:flutter_test/flutter_test.dart';
+import 'package:secure_wallet/core/security/receipt_verifier.dart';
+
+void main() {
+  test('canonicalJson ordena llaves y no agrega espacios (igual que el backend)', () {
+    expect(
+      canonicalJson({'b': 1, 'a': {'d': 2, 'c': 3}, 'l': [2, 1]}),
+      '{"a":{"c":3,"d":2},"b":1,"l":[2,1]}',
+    );
+  });
+}
+
+=== mobile/test/widget_test.dart ===
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:secure_wallet/app.dart';
+
+void main() {
+  testWidgets('el splash lleva a la pantalla de inicio de sesiÃ³n', (tester) async {
+    await tester.pumpWidget(const ProviderScope(child: SecureWalletApp()));
+    // El splash espera ~1.8 s antes de navegar.
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+    expect(find.text('Iniciar sesiÃ³n'), findsWidgets);
+    expect(find.text('Crear cuenta'), findsOneWidget);
+  });
+}
