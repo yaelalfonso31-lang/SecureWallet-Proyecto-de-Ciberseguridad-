@@ -4,48 +4,88 @@ import 'package:go_router/go_router.dart';
 
 import '../../bank/presentation/bank_page.dart';
 import '../../store/presentation/store_page.dart';
-import '../data/auth_repository.dart';
 import 'cards_page.dart';
+import 'dashboard_page.dart';
+import 'profile_page.dart';
+import 'theme/wallet_palette.dart';
 
-class HomePage extends ConsumerStatefulWidget {
-  const HomePage({super.key});
-
+/// Pestaña activa de la barra inferior. Otras pantallas pueden cambiarla con
+class HomeTabNotifier extends Notifier<int> {
   @override
-  ConsumerState<HomePage> createState() => _HomePageState();
+  int build() => 0;
+
+  void select(int index) {
+    state = index;
+  }
 }
 
-class _HomePageState extends ConsumerState<HomePage> {
-  int _index = 0;
+final homeTabProvider = NotifierProvider<HomeTabNotifier, int>(HomeTabNotifier.new);
 
-  static const _titles = ['Mi Wallet', 'Banco', 'Tienda'];
-  static const _pages = [CardsPage(), BankPage(), StorePage()];
+class HomePage extends ConsumerWidget {
+  const HomePage({super.key});
 
-  Future<void> _logout() async {
-    await ref.read(authRepositoryProvider).logout();
-    if (mounted) context.go('/login');
-  }
+  static const _titles = ['Inicio', 'Mis tarjetas', 'Banco', 'Tienda', 'Mi perfil'];
+  static const _pages = <Widget>[
+    DashboardPage(),
+    CardsPage(),
+    BankPage(),
+    StorePage(),
+    ProfilePage(),
+  ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final index = ref.watch(homeTabProvider);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_titles[_index]),
-        actions: [
-          IconButton(
-            tooltip: 'Cerrar sesión',
-            icon: const Icon(Icons.logout),
-            onPressed: _logout,
-          ),
-        ],
-      ),
-      body: _pages[_index],
+      backgroundColor: WalletColors.background,
+      appBar: index == 0
+          ? null
+          : AppBar(
+              backgroundColor: WalletColors.navy,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              centerTitle: false,
+              title: Text(_titles[index], style: const TextStyle(fontWeight: FontWeight.w800)),
+              actions: [
+                IconButton(
+                  tooltip: 'Notificaciones',
+                  icon: const Icon(Icons.notifications_rounded),
+                  onPressed: () => context.push('/notifications'),
+                ),
+              ],
+            ),
+      body: _pages[index],
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        selectedIndex: index,
+        backgroundColor: Colors.white,
+        indicatorColor: WalletColors.yellow,
+        onDestinationSelected: (i) => ref.read(homeTabProvider.notifier).select(i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.account_balance_wallet), label: 'Wallet'),
-          NavigationDestination(icon: Icon(Icons.account_balance), label: 'Banco'),
-          NavigationDestination(icon: Icon(Icons.storefront), label: 'Tienda'),
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded, color: WalletColors.navy),
+            label: 'Inicio',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.credit_card_outlined),
+            selectedIcon: Icon(Icons.credit_card_rounded, color: WalletColors.navy),
+            label: 'Tarjetas',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.account_balance_outlined),
+            selectedIcon: Icon(Icons.account_balance_rounded, color: WalletColors.navy),
+            label: 'Banco',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.storefront_outlined),
+            selectedIcon: Icon(Icons.storefront_rounded, color: WalletColors.navy),
+            label: 'Tienda',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline_rounded),
+            selectedIcon: Icon(Icons.person_rounded, color: WalletColors.navy),
+            label: 'Perfil',
+          ),
         ],
       ),
     );
