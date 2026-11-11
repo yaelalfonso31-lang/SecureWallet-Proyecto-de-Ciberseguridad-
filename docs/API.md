@@ -27,8 +27,8 @@ la Wallet, y se envían como `Authorization: Bearer <token>`.
 | POST | `/transactions/process` | `X-API-Key` | Procesa orden firmada → `{receipt, signature}`. 400 firma/expirada, 402 fondos, 403 cuenta congelada, 404 sin cuenta, 409 repetida. Cada cargo deja un `Movement` |
 | POST | `/oauth/authorize` | aserción Wallet | _(pendiente, B2)_ Login + PKCE → `{code, state}`. 400 credenciales/aserción, 423 bloqueado |
 | POST | `/oauth/token` | — | _(pendiente, B2)_ Canjea `code` + `code_verifier` → `{access_token, scope}`. 400 código inválido/usado/expirado |
-| GET | `/accounts/me` | JWT Banco `accounts:read` | _(pendiente, B3)_ Saldo, número enmascarado y estado de la cuenta del dueño del token |
-| GET | `/accounts/me/movements` | JWT Banco `accounts:read` | _(pendiente, B3)_ Movimientos del dueño (`limit` 1–100, `before`). Anti-IDOR |
+| GET | `/accounts/me` | JWT Banco `accounts:read` | Saldo, número enmascarado (`•••• 1234`), moneda y estado de la cuenta del dueño del token. 401 sin token, 404 sin cuenta |
+| GET | `/accounts/me/movements` | JWT Banco `accounts:read` | Movimientos del dueño, desc por id (`limit` 1–100, cursor `before`). Anti-IDOR: nunca hay rutas `/accounts/{id}` |
 | GET | `/promotions/{id}` | — | _(pendiente, B4-a)_ Detalle de una promoción |
 | POST | `/promotions/{id}/redeem` | JWT Banco `promotions:redeem` | _(pendiente, B4-a)_ Canje de un solo uso. 400 vencida, 409 ya canjeada |
 | POST | `/transfers/to-wallet` | JWT Banco `transfers:write` | _(pendiente, B5)_ Recarga a la Wallet → comprobante firmado. Idempotente |
