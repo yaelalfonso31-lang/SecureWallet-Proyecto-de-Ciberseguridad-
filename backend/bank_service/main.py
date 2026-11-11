@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from bank_service.database import Base, SessionLocal, engine
 from bank_service.models import Promotion
-from bank_service.routers import accounts, promotions, transactions
+from bank_service.routers import accounts, oauth, promotions, transactions
 from shared.http import harden_app
 
 SEED_PROMOTIONS = [
@@ -31,6 +31,7 @@ app = FastAPI(title="SecureWallet - Bank Service (simulado)", version="0.1.0", l
 harden_app(app)
 
 app.include_router(accounts.router)
+app.include_router(oauth.router)
 app.include_router(promotions.router)
 app.include_router(transactions.router)
 
