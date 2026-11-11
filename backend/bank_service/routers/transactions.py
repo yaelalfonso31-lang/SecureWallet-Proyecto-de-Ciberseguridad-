@@ -7,7 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from bank_service.database import get_db
-from bank_service.models import Account, ProcessedOrder
+from bank_service.models import Account, Movement, ProcessedOrder
 from shared.config import settings
 from shared.schemas import SignedOrder, SignedReceipt
 from shared.security.hashing import constant_time_equals, sha256_hex
@@ -15,8 +15,6 @@ from shared.security.signing import canonical_json, sign, verify
 from shared.timeutil import utcnow
 
 router = APIRouter(tags=["transactions"])
-
-DEMO_INITIAL_BALANCE_CENTS = 100_000  # $1,000.00 MXN de saldo de prueba
 
 
 def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -29,12 +27,18 @@ def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
         raise HTTPException(401, "API key inválida")
 
 
-def _get_or_create_account(db: Session, owner_ref: str) -> Account:
-    account = db.scalar(select(Account).where(Account.owner_ref == owner_ref))
+def _get_account_for_update(db: Session, owner_ref: str) -> Account:
+    """Búsqueda estricta: la cuenta ya debe estar dada de alta.
+
+    Nunca crea cuentas (antes se regalaban $1,000 a cualquier payer desconocido).
+    `with_for_update` bloquea la fila en PostgreSQL para evitar dos cobros
+    simultáneos; en SQLite se ignora sin efecto.
+    """
+    account = db.scalar(select(Account).where(Account.owner_ref == owner_ref).with_for_update())
     if account is None:
-        account = Account(owner_ref=owner_ref, balance_cents=DEMO_INITIAL_BALANCE_CENTS)
-        db.add(account)
-        db.flush()
+        raise HTTPException(404, "Cuenta no encontrada")
+    if account.status == "frozen":
+        raise HTTPException(403, "Cuenta congelada")
     return account
 
 
@@ -65,13 +69,25 @@ def process_transaction(body: SignedOrder, db: Session = Depends(get_db)):
     if duplicate:
         raise HTTPException(409, "Orden ya procesada")
 
-    # 4) Fondos.
-    account = _get_or_create_account(db, order["payer"])
+    # 4) Fondos: la cuenta debe existir y estar activa.
+    account = _get_account_for_update(db, order["payer"])
     if account.balance_cents < order["amount_cents"]:
         raise HTTPException(402, "Fondos insuficientes")
     account.balance_cents -= order["amount_cents"]
 
-    # 5) Recibo firmado por el Banco (no repudio).
+    # 5) Movimiento inmutable (trazabilidad), en el mismo commit que el cargo.
+    db.add(
+        Movement(
+            account_id=account.id,
+            kind="debit",
+            amount_cents=order["amount_cents"],
+            balance_after_cents=account.balance_cents,
+            concept=f"Pago de orden {order['order_id']}",
+            reference=order["order_id"],
+        )
+    )
+
+    # 6) Recibo firmado por el Banco (no repudio).
     receipt = {
         "receipt_id": uuid.uuid4().hex,
         "order_id": order["order_id"],
