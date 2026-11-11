@@ -1,6 +1,12 @@
 from shared.security.signing import verify
 from tests.conftest import BANK_API_KEY, BANK_PUB, WALLET_PUB
-from tests.helpers import register_and_login
+from tests.helpers import ensure_bank_account, register_and_login
+
+
+def _fund_wallet_user(wallet_client, headers, balance_cents=100_000_000):
+    """Da de alta y fondea la cuenta bancaria del usuario de la Wallet (payer=user.id)."""
+    user_id = wallet_client.get("/auth/me", headers=headers).json()["id"]
+    ensure_bank_account(user_id, balance_cents=balance_cents)
 
 
 def _bank_to_memory(monkeypatch, bank_client):
@@ -20,6 +26,7 @@ def test_full_purchase_flow_wallet_store_bank(wallet_client, store_client, bank_
     _bank_to_memory(monkeypatch, bank_client)
 
     _, headers = register_and_login(wallet_client)
+    _fund_wallet_user(wallet_client, headers)
     product = store_client.get("/products").json()[0]
 
     # 1) La app crea la orden en la Tienda
@@ -126,6 +133,7 @@ def test_duplicate_lines_are_merged_for_stock_check(wallet_client, store_client)
 def test_coupon_can_only_be_redeemed_once_per_user(wallet_client, store_client, bank_client, monkeypatch):
     _bank_to_memory(monkeypatch, bank_client)
     _, headers = register_and_login(wallet_client)
+    _fund_wallet_user(wallet_client, headers)
     product = store_client.get("/products").json()[0]
     body = {"items": [{"product_id": product["id"], "quantity": 1}], "coupon_code": "BIENVENIDA10"}
 

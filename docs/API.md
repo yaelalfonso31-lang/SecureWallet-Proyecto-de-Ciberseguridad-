@@ -24,7 +24,7 @@ la Wallet, y se envían como `Authorization: Bearer <token>`.
 |---|---|---|---|
 | GET | `/promotions` | — | Bonos y promociones activas |
 | GET | `/bank/public-key` | — | Clave pública Ed25519 del Banco |
-| POST | `/transactions/process` | `X-API-Key` | Procesa orden firmada → `{receipt, signature}`. 400 firma/expirada, 402 fondos, 409 repetida |
+| POST | `/transactions/process` | `X-API-Key` | Procesa orden firmada → `{receipt, signature}`. 400 firma/expirada, 402 fondos, 403 cuenta congelada, 404 sin cuenta, 409 repetida. Cada cargo deja un `Movement` |
 | POST | `/oauth/authorize` | aserción Wallet | _(pendiente, B2)_ Login + PKCE → `{code, state}`. 400 credenciales/aserción, 423 bloqueado |
 | POST | `/oauth/token` | — | _(pendiente, B2)_ Canjea `code` + `code_verifier` → `{access_token, scope}`. 400 código inválido/usado/expirado |
 | GET | `/accounts/me` | JWT Banco `accounts:read` | _(pendiente, B3)_ Saldo, número enmascarado y estado de la cuenta del dueño del token |
