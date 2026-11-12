@@ -109,6 +109,10 @@ class Transfer(Base):
     direction: Mapped[str] = mapped_column(String(20))  # to_wallet | from_wallet
     amount_cents: Mapped[int] = mapped_column(Integer)
     idempotency_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # Comprobante y firma guardados para poder devolver el MISMO comprobante
+    # cuando se repite la idempotency_key (idempotencia exacta).
+    voucher_json: Mapped[str] = mapped_column(Text, default="")
+    signature: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

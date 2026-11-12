@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import select
 
 from bank_service.database import SessionLocal
-from bank_service.models import Account, Movement
+from bank_service.models import Account, Movement, Promotion, PromotionRedemption
 from shared.schemas import PaymentOrder
 from shared.security.signing import sign, verify
 from tests.conftest import BANK_API_KEY, BANK_PUB, WALLET_PRIV
@@ -112,3 +112,67 @@ def test_payment_creates_movement_with_correct_balance(bank_client):
         assert movement.kind == "debit"
         assert movement.amount_cents == 1000
         assert movement.balance_after_cents == INITIAL_BALANCE - 1000
+
+
+def _redeem_promotion(owner_ref, discount_percent=10):
+    """Inserta directamente en la BD una promoción y su canje pendiente (sin B4-a)."""
+    with SessionLocal() as db:
+        account = db.scalar(select(Account).where(Account.owner_ref == owner_ref))
+        promo = Promotion(title="Promo test", description="desc", discount_percent=discount_percent, active=True)
+        db.add(promo)
+        db.flush()
+        db.add(PromotionRedemption(promotion_id=promo.id, account_id=account.id))
+        db.commit()
+        return promo.id
+
+
+def test_redeemed_promotion_applies_discount(bank_client):
+    promo_id = _redeem_promotion(DEFAULT_PAYER, discount_percent=10)
+    payload = signed_order(amount=1000)
+    r = bank_client.post("/transactions/process", json=payload, headers=H)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    receipt = data["receipt"]
+
+    # amount_cents NO cambia; el desglose va en campos nuevos y el recibo sigue firmado.
+    assert receipt["amount_cents"] == 1000
+    assert receipt["discount_cents"] == 100  # 1000 * 10 // 100
+    assert receipt["charged_cents"] == 900
+    assert receipt["promotion_id"] == promo_id
+    assert verify(BANK_PUB, receipt, data["signature"])
+
+    order_id = payload["order"]["order_id"]
+    with SessionLocal() as db:
+        account = db.scalar(select(Account).where(Account.owner_ref == DEFAULT_PAYER))
+        assert account.balance_cents == INITIAL_BALANCE - 900  # se cobró con descuento
+
+        movement = db.scalar(select(Movement).where(Movement.reference == order_id))
+        assert movement.amount_cents == 900
+        assert movement.balance_after_cents == INITIAL_BALANCE - 900
+
+        redemption = db.scalar(select(PromotionRedemption).where(PromotionRedemption.promotion_id == promo_id))
+        assert redemption.used_in_order_id == order_id  # quedó marcado como usado
+
+
+def test_redemption_is_not_applied_twice(bank_client):
+    _redeem_promotion(DEFAULT_PAYER, discount_percent=10)
+
+    first = bank_client.post("/transactions/process", json=signed_order(amount=1000), headers=H)
+    assert first.json()["receipt"]["discount_cents"] == 100
+
+    # El siguiente pago (nueva orden) ya NO tiene canje pendiente: cobro completo.
+    second = bank_client.post("/transactions/process", json=signed_order(amount=1000), headers=H)
+    receipt = second.json()["receipt"]
+    assert receipt["discount_cents"] == 0
+    assert receipt["charged_cents"] == 1000
+    assert receipt["promotion_id"] is None
+
+
+def test_payment_without_redemption_charges_full_amount(bank_client):
+    payload = signed_order(amount=1000)
+    r = bank_client.post("/transactions/process", json=payload, headers=H)
+    receipt = r.json()["receipt"]
+    assert receipt["discount_cents"] == 0
+    assert receipt["charged_cents"] == 1000
+    assert receipt["promotion_id"] is None
+    assert verify(BANK_PUB, receipt, r.json()["signature"])
