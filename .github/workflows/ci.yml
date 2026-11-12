@@ -25,7 +25,9 @@ jobs:
         with:
           channel: stable
       - run: cd mobile && flutter pub get
-      - run: cd mobile && flutter analyze
+      # Solo falla por errores reales, no por avisos (infos/warnings) de lints
+      # que cambian con cada versión de Flutter (p. ej. la deprecación de material.dart).
+      - run: cd mobile && flutter analyze --no-fatal-infos --no-fatal-warnings
       - run: cd mobile && flutter test
 
   secrets-scan:

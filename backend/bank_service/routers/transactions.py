@@ -1,17 +1,17 @@
 import json
-import time
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bank_service.database import get_db
-from bank_service.models import Account, Movement, ProcessedOrder
+from bank_service.models import Account, Movement, ProcessedOrder, Promotion, PromotionRedemption
+from bank_service.verification import ensure_fresh, ensure_nonce_unique, verify_wallet_signature
 from shared.config import settings
 from shared.schemas import SignedOrder, SignedReceipt
 from shared.security.hashing import constant_time_equals, sha256_hex
-from shared.security.signing import canonical_json, sign, verify
+from shared.security.signing import canonical_json, sign
 from shared.timeutil import utcnow
 
 router = APIRouter(tags=["transactions"])
@@ -53,46 +53,68 @@ def process_transaction(body: SignedOrder, db: Session = Depends(get_db)):
     order = body.order.model_dump()
 
     # 1) Autenticidad e integridad: la firma debe ser de la Wallet y la orden no pudo cambiar.
-    if not verify(settings.wallet_signing_public_key, order, body.signature):
-        raise HTTPException(400, "Firma inválida")
+    verify_wallet_signature(order, body.signature)
 
     # 2) Frescura: rechaza órdenes viejas (ventana corta anti-replay).
-    if abs(time.time() - order["timestamp"]) > settings.order_max_age_seconds:
-        raise HTTPException(400, "Orden expirada")
+    ensure_fresh(order["timestamp"])
 
     # 3) Unicidad: el mismo nonce/order_id no se procesa dos veces.
-    duplicate = db.scalar(
-        select(ProcessedOrder).where(
-            or_(ProcessedOrder.nonce == order["nonce"], ProcessedOrder.order_id == order["order_id"])
-        )
-    )
-    if duplicate:
+    ensure_nonce_unique(db, ProcessedOrder, order["nonce"])
+    if db.scalar(select(ProcessedOrder).where(ProcessedOrder.order_id == order["order_id"])):
         raise HTTPException(409, "Orden ya procesada")
 
     # 4) Fondos: la cuenta debe existir y estar activa.
     account = _get_account_for_update(db, order["payer"])
-    if account.balance_cents < order["amount_cents"]:
-        raise HTTPException(402, "Fondos insuficientes")
-    account.balance_cents -= order["amount_cents"]
 
-    # 5) Movimiento inmutable (trazabilidad), en el mismo commit que el cargo.
+    # 5) Canje pendiente (si lo hay): el Banco, nunca la app ni la Tienda, calcula
+    #    el descuento. Se toma el canje más antiguo sin usar y se bloquea la fila.
+    redemption = db.scalar(
+        select(PromotionRedemption)
+        .where(
+            PromotionRedemption.account_id == account.id,
+            PromotionRedemption.used_in_order_id.is_(None),
+        )
+        .order_by(PromotionRedemption.id)
+        .limit(1)
+        .with_for_update()
+    )
+    discount_cents = 0
+    promotion_id = None
+    if redemption is not None:
+        promotion = db.get(Promotion, redemption.promotion_id)
+        promotion_id = promotion.id
+        discount_cents = order["amount_cents"] * promotion.discount_percent // 100
+
+    # 6) Se cobra el monto con descuento. `amount_cents` NO cambia, porque la
+    #    Tienda lo compara con el total de su orden.
+    charged_cents = order["amount_cents"] - discount_cents
+    if account.balance_cents < charged_cents:
+        raise HTTPException(402, "Fondos insuficientes")
+    account.balance_cents -= charged_cents
+    if redemption is not None:
+        redemption.used_in_order_id = order["order_id"]  # el canje es de un solo uso
+
+    # 7) Movimiento inmutable por lo realmente cobrado, en el mismo commit.
     db.add(
         Movement(
             account_id=account.id,
             kind="debit",
-            amount_cents=order["amount_cents"],
+            amount_cents=charged_cents,
             balance_after_cents=account.balance_cents,
             concept=f"Pago de orden {order['order_id']}",
             reference=order["order_id"],
         )
     )
 
-    # 6) Recibo firmado por el Banco (no repudio).
+    # 8) Recibo firmado por el Banco (no repudio), con el desglose del descuento.
     receipt = {
         "receipt_id": uuid.uuid4().hex,
         "order_id": order["order_id"],
         "payer": order["payer"],
         "amount_cents": order["amount_cents"],
+        "discount_cents": discount_cents,
+        "charged_cents": charged_cents,
+        "promotion_id": promotion_id,
         "currency": order["currency"],
         "status": "approved",
         "processed_at": utcnow().isoformat(),
