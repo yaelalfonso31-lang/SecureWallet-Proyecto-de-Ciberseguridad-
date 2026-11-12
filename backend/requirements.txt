@@ -10,7 +10,7 @@ psycopg[binary]>=3.2
 argon2-cffi>=25.1.0
 cryptography>=43
 pyjwt>=2.9
-pyotp>=2.9
+pyotp>=2.10.0
 httpx>=0.28.1
 
 pytest>=8.3
