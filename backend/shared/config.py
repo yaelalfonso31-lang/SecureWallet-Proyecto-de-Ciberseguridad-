@@ -33,5 +33,8 @@ class Settings(BaseSettings):
     lockout_minutes: int = 15
     order_max_age_seconds: int = 120
 
+    # Límite diario de transferencias banco -> wallet por cuenta (B5), en centavos.
+    bank_transfer_daily_limit_cents: int = 1_000_000
+
 
 settings = Settings()
