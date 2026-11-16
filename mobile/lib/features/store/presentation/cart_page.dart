@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/security/biometric_service.dart';
+import '../../wallet/data/cards_repository.dart';
 import '../data/cart_provider.dart';
 import '../data/store_repository.dart';
-import 'store_page.dart' show formatPrice;
+import 'store_page.dart' show formatPrice, productsProvider;
 
 class CartPage extends ConsumerStatefulWidget {
   const CartPage({super.key});
@@ -16,11 +18,13 @@ class CartPage extends ConsumerStatefulWidget {
 
 class _CartPageState extends ConsumerState<CartPage> {
   final _couponCtrl = TextEditingController();
+  final _biometric = BiometricService();
   Quote? _quote;
   String? _coupon; // cupón que se está intentando aplicar
   String? _couponError;
   String? _error;
   bool _loading = false;
+  bool _paying = false;
   int _seq = 0; // descarta respuestas viejas si el carrito cambia rápido
 
   @override
@@ -94,6 +98,74 @@ class _CartPageState extends ConsumerState<CartPage> {
     _refresh();
   }
 
+  Future<void> _payWithWallet() async {
+    final lines = ref.read(cartProvider);
+    if (lines.isEmpty || _quote == null) return;
+
+    setState(() {
+      _paying = true;
+      _error = null;
+    });
+
+    try {
+      // 1) Re-autenticación biométrica si el dispositivo lo soporta.
+      if (await _biometric.isAvailable()) {
+        final ok = await _biometric.authenticate(
+          'Confirma el pago de ${formatPrice(_quote!.totalCents)} en SecureStore',
+        );
+        if (!ok) {
+          if (mounted) {
+            setState(() {
+              _paying = false;
+              _error = 'Autenticación biométrica cancelada';
+            });
+          }
+          return;
+        }
+      }
+
+      // 2) Ejecutar el flujo completo de pago (Tienda -> Wallet -> Tienda -> Banco).
+      final defaultCardId = ref.read(defaultCardIdProvider);
+      final result = await ref.read(storeRepositoryProvider).checkoutWithWallet(
+            lines,
+            coupon: _quote!.couponCode,
+            cardId: defaultCardId,
+          );
+
+      if (!mounted) return;
+      if (!result.signatureVerified) {
+        setState(() {
+          _paying = false;
+          _error = 'La firma Ed25519 del recibo bancario no es válida';
+        });
+        return;
+      }
+
+      // 3) Limpiar el carrito y refrescar el catálogo para actualizar el stock.
+      ref.read(cartProvider.notifier).clear();
+      ref.invalidate(productsProvider);
+      setState(() => _paying = false);
+
+      // 4) Mostrar el recibo firmado por el Banco.
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (ctx) => _ReceiptSheet(result: result),
+      );
+
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _paying = false;
+        _error = errorMessage(e);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen(cartProvider, (_, __) => _refresh());
@@ -109,7 +181,7 @@ class _CartPageState extends ConsumerState<CartPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                if (_loading) const LinearProgressIndicator(),
+                if (_loading || _paying) const LinearProgressIndicator(),
                 for (final l in lines)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -122,19 +194,19 @@ class _CartPageState extends ConsumerState<CartPage> {
                       children: [
                         IconButton(
                           icon: const Icon(Icons.remove_circle_outline),
-                          onPressed: () => cart.decrement(l.productId),
+                          onPressed: _paying ? null : () => cart.decrement(l.productId),
                         ),
                         Text('${l.quantity}'),
                         IconButton(
                           icon: const Icon(Icons.add_circle_outline),
-                          onPressed: l.quantity < kMaxQtyPerProduct
+                          onPressed: (!_paying && l.quantity < kMaxQtyPerProduct)
                               ? () => cart.add(l.productId, l.name)
                               : null,
                         ),
                         IconButton(
                           tooltip: 'Quitar',
                           icon: const Icon(Icons.delete_outline),
-                          onPressed: () => cart.remove(l.productId),
+                          onPressed: _paying ? null : () => cart.remove(l.productId),
                         ),
                       ],
                     ),
@@ -144,7 +216,7 @@ class _CartPageState extends ConsumerState<CartPage> {
                   Chip(
                     avatar: const Icon(Icons.local_offer, size: 18),
                     label: Text('Cupón $appliedCoupon'),
-                    onDeleted: _removeCoupon,
+                    onDeleted: _paying ? null : _removeCoupon,
                   )
                 else
                   Row(
@@ -152,6 +224,7 @@ class _CartPageState extends ConsumerState<CartPage> {
                       Expanded(
                         child: TextField(
                           controller: _couponCtrl,
+                          enabled: !_paying,
                           textCapitalization: TextCapitalization.characters,
                           maxLength: 32,
                           decoration: InputDecoration(
@@ -163,17 +236,39 @@ class _CartPageState extends ConsumerState<CartPage> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      FilledButton(onPressed: _loading ? null : _applyCoupon, child: const Text('Aplicar')),
+                      FilledButton(
+                        onPressed: (_loading || _paying) ? null : _applyCoupon,
+                        child: const Text('Aplicar'),
+                      ),
                     ],
                   ),
                 const SizedBox(height: 16),
-                if (_error != null)
-                  Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))
-                else if (_quote != null) ...[
+                if (_error != null) ...[
+                  Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  const SizedBox(height: 12),
+                ],
+                if (_quote != null) ...[
                   _row('Subtotal', formatPrice(_quote!.subtotalCents)),
-                  if (_quote!.discountCents > 0) _row('Descuento', '-${formatPrice(_quote!.discountCents)}'),
+                  if (_quote!.discountCents > 0)
+                    _row('Descuento cupón', '-${formatPrice(_quote!.discountCents)}'),
                   const SizedBox(height: 4),
                   _row('Total', formatPrice(_quote!.totalCents), bold: true),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: (_loading || _paying) ? null : _payWithWallet,
+                    icon: _paying
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.fingerprint),
+                    label: Text(
+                      _paying
+                          ? 'Procesando pago seguro…'
+                          : 'Pagar con Wallet (${formatPrice(_quote!.totalCents)})',
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -187,6 +282,79 @@ class _CartPageState extends ConsumerState<CartPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [Text(label, style: style), Text(value, style: style)],
+      ),
+    );
+  }
+}
+
+class _ReceiptSheet extends StatelessWidget {
+  const _ReceiptSheet({required this.result});
+
+  final PaymentResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final receipt = result.receipt;
+    final amountCents = (receipt['amount_cents'] as int?) ?? 0;
+    final bankDiscountCents = (receipt['discount_cents'] as int?) ?? 0;
+    final chargedCents = (receipt['charged_cents'] as int?) ?? amountCents;
+    final receiptId = '${receipt['receipt_id'] ?? ''}';
+    final orderHash = '${receipt['order_hash'] ?? ''}';
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Icon(Icons.verified_rounded, color: Colors.green, size: 56),
+            const SizedBox(height: 12),
+            Text(
+              '¡Pago aprobado!',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Firma Ed25519 del Banco verificada',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.green, fontWeight: FontWeight.w600),
+            ),
+            const Divider(height: 28),
+            _detail('Orden', result.orderId),
+            _detail('Recibo', receiptId),
+            _detail('Monto de la orden', formatPrice(amountCents)),
+            if (bankDiscountCents > 0)
+              _detail('Descuento promoción Banco', '-${formatPrice(bankDiscountCents)}'),
+            _detail('Total cargado en Banco', formatPrice(chargedCents), bold: true),
+            if (orderHash.isNotEmpty)
+              _detail(
+                'Hash SHA-256 orden',
+                orderHash.length > 16 ? '${orderHash.substring(0, 16)}…' : orderHash,
+              ),
+            const SizedBox(height: 20),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Listo'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detail(String label, String value, {bool bold = false}) {
+    final style = bold ? const TextStyle(fontWeight: FontWeight.bold) : null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: style),
+          const SizedBox(width: 12),
+          Flexible(child: Text(value, textAlign: TextAlign.right, style: style)),
+        ],
       ),
     );
   }
