@@ -2,7 +2,8 @@ import json
 import secrets
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from shared.config import settings
@@ -101,6 +102,8 @@ def _charge_and_confirm(db: Session, order: Order, body: SignedOrder) -> dict:
 def pay_order(order_id: str, body: SignedOrder, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     """Recibe la orden firmada por la Wallet, la manda al Banco y verifica el recibo firmado."""
     order = _get_own_order(db, order_id, user_id)
+    if order.status == "cancelled":
+        raise HTTPException(409, "La orden fue cancelada")
     if order.status != "pending":
         raise HTTPException(409, "La orden ya fue pagada")
 
@@ -123,6 +126,64 @@ def pay_order(order_id: str, body: SignedOrder, user_id: str = Depends(current_u
         if has_coupon:
             release_coupon(db, order)
         raise
+
+
+def _summary(db: Session, order: Order) -> dict:
+    """Resumen de una orden para el historial: incluye nombres de producto y lo realmente cobrado."""
+    names = {p.id: p.name for p in db.scalars(select(Product))}
+    items = [
+        {
+            "product_id": i["product_id"],
+            "name": names.get(i["product_id"], f"Producto {i['product_id']}"),
+            "quantity": i["quantity"],
+            "unit_price_cents": i["unit_price_cents"],
+        }
+        for i in json.loads(order.items_json)
+    ]
+    receipt = json.loads(order.receipt_json) if order.receipt_json else None
+    return {
+        "order_id": order.order_id,
+        "status": order.status,
+        "amount_cents": order.total_cents,
+        "subtotal_cents": order.subtotal_cents,
+        "discount_cents": order.discount_cents,
+        "coupon_code": order.coupon_code,
+        "currency": order.currency,
+        "created_at": order.created_at.isoformat(),
+        "items": items,
+        "items_count": sum(i["quantity"] for i in items),
+        "charged_cents": receipt.get("charged_cents", order.total_cents) if receipt else None,
+        "bank_discount_cents": receipt.get("discount_cents", 0) if receipt else 0,
+        "receipt": receipt,
+        "signature": order.receipt_signature,
+    }
+
+
+# Debe ir antes de "/{order_id}" para que no se confunda con un id.
+@router.get("")
+def list_orders(
+    limit: int = Query(20, ge=1, le=100),
+    status: str | None = Query(default=None, pattern="^(pending|paid|cancelled)$"),
+    user_id: str = Depends(current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Historial del usuario autenticado (más recientes primero). Nunca muestra órdenes ajenas."""
+    stmt = select(Order).where(Order.user_id == user_id)
+    if status:
+        stmt = stmt.where(Order.status == status)
+    stmt = stmt.order_by(Order.created_at.desc(), Order.order_id.desc()).limit(limit)
+    return [_summary(db, o) for o in db.scalars(stmt)]
+
+
+@router.post("/{order_id}/cancel")
+def cancel_order(order_id: str, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Cancela una orden pendiente. Una orden pagada no se puede cancelar desde aquí."""
+    order = _get_own_order(db, order_id, user_id)
+    if order.status != "pending":
+        raise HTTPException(409, "Solo se pueden cancelar órdenes pendientes")
+    order.status = "cancelled"
+    db.commit()
+    return {"order_id": order.order_id, "status": order.status}
 
 
 @router.get("/{order_id}")

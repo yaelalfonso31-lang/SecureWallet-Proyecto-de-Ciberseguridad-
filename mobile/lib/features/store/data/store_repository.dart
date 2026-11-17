@@ -4,6 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/security/receipt_verifier.dart';
 import 'cart_provider.dart';
+import 'store_models.dart';
+
+/// Nombre del comercio que firma la orden (igual que `MERCHANT` en el backend de la Tienda).
+const storeMerchant = 'SecureStore';
 
 class QuoteLine {
   const QuoteLine({
@@ -115,12 +119,44 @@ class StoreRepository {
     final order = Map<String, dynamic>.from(orderRes.data as Map);
     final orderId = order['order_id'] as String;
 
+    return _authorizeAndPay(
+      orderId: orderId,
+      merchant: order['merchant'] as String,
+      amountCents: order['amount_cents'] as int,
+      currency: (order['currency'] as String?) ?? 'MXN',
+      cardId: cardId,
+    );
+  }
+
+  /// Paga una orden que ya existe (pendiente): Wallet firma → Tienda cobra en el Banco → se verifica el recibo.
+  Future<PaymentResult> payExistingOrder(StoreOrder order, {String? cardId}) {
+    return _authorizeAndPay(
+      orderId: order.orderId,
+      merchant: storeMerchant,
+      amountCents: order.amountCents,
+      currency: 'MXN',
+      cardId: cardId,
+    );
+  }
+
+  Future<PaymentResult> _authorizeAndPay({
+    required String orderId,
+    required String merchant,
+    required int amountCents,
+    required String currency,
+    String? cardId,
+  }) async {
+    final walletDio = _walletDio;
+    if (walletDio == null) {
+      throw StateError('walletDio no configurado en StoreRepository');
+    }
+
     // 2) Pedir a la Wallet que firme la orden de pago con Ed25519.
     final signedRes = await walletDio.post<dynamic>('/payments/authorize', data: {
       'order_id': orderId,
-      'merchant': order['merchant'],
-      'amount_cents': order['amount_cents'],
-      'currency': order['currency'] ?? 'MXN',
+      'merchant': merchant,
+      'amount_cents': amountCents,
+      'currency': currency,
       if (cardId != null) 'card_id': cardId,
     });
     final signedOrder = Map<String, dynamic>.from(signedRes.data as Map);
@@ -156,6 +192,42 @@ class StoreRepository {
       signatureVerified: verified,
     );
   }
+
+  // ---------------- Catálogo ----------------
+
+  Future<List<StoreProduct>> products({String? query, String? category}) async {
+    final res = await _dio.get<dynamic>('/products', queryParameters: {
+      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+      if (category != null) 'category': category,
+    });
+    return [for (final p in res.data as List<dynamic>) StoreProduct.fromJson(p as Map<String, dynamic>)];
+  }
+
+  Future<List<String>> categories() async {
+    final res = await _dio.get<dynamic>('/products/categories');
+    return [for (final c in res.data as List<dynamic>) c as String];
+  }
+
+  // ---------------- Historial de órdenes ----------------
+
+  Future<List<StoreOrder>> orders({int limit = 30}) async {
+    final res = await _dio.get<dynamic>('/orders', queryParameters: {'limit': limit});
+    return [for (final o in res.data as List<dynamic>) StoreOrder.fromJson(o as Map<String, dynamic>)];
+  }
+
+  Future<void> cancelOrder(String orderId) async {
+    await _dio.post<dynamic>('/orders/$orderId/cancel');
+  }
+
+  /// Verifica en el teléfono la firma Ed25519 del recibo con la clave pública del Banco.
+  /// Lanza si no se puede consultar la clave pública (sin red hacia el Banco).
+  Future<bool> verifyReceipt(Map<String, dynamic> receipt, String signature) async {
+    final bankDio = _bankDio;
+    if (bankDio == null) throw StateError('bankDio no configurado en StoreRepository');
+    final res = await bankDio.get<dynamic>('/bank/public-key');
+    final publicKey = (res.data as Map<String, dynamic>)['public_key'] as String;
+    return _verifier.verify(payload: receipt, signatureB64: signature, publicKeyB64: publicKey);
+  }
 }
 
 final storeRepositoryProvider = Provider<StoreRepository>(
@@ -164,4 +236,40 @@ final storeRepositoryProvider = Provider<StoreRepository>(
     walletDio: ref.watch(walletDioProvider),
     bankDio: ref.watch(bankDioProvider),
   ),
+);
+
+/// Búsqueda y categoría activas en el catálogo.
+class StoreSearchNotifier extends Notifier<String> {
+  @override
+  String build() => '';
+
+  void setQuery(String value) {
+    state = value;
+  }
+}
+
+class StoreCategoryNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void select(String? category) {
+    state = category;
+  }
+}
+
+final storeSearchProvider = NotifierProvider<StoreSearchNotifier, String>(StoreSearchNotifier.new);
+final storeCategoryProvider = NotifierProvider<StoreCategoryNotifier, String?>(StoreCategoryNotifier.new);
+
+final productsProvider = FutureProvider.autoDispose<List<StoreProduct>>((ref) {
+  final query = ref.watch(storeSearchProvider);
+  final category = ref.watch(storeCategoryProvider);
+  return ref.watch(storeRepositoryProvider).products(query: query, category: category);
+});
+
+final categoriesProvider = FutureProvider.autoDispose<List<String>>(
+  (ref) => ref.watch(storeRepositoryProvider).categories(),
+);
+
+final ordersProvider = FutureProvider.autoDispose<List<StoreOrder>>(
+  (ref) => ref.watch(storeRepositoryProvider).orders(),
 );

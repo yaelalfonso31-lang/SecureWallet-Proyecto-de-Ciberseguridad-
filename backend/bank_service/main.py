@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from bank_service.database import Base, SessionLocal, engine
 from bank_service.models import Promotion
-from bank_service.routers import accounts, oauth, promotions, transactions, transfers
+from bank_service.routers import accounts, oauth, promotions, transactions, transfers, admin, onboarding
 from shared.http import harden_app
 
 SEED_PROMOTIONS = [
@@ -35,7 +35,8 @@ app.include_router(oauth.router)
 app.include_router(promotions.router)
 app.include_router(transactions.router)
 app.include_router(transfers.router)
-
+app.include_router(admin.router)
+app.include_router(onboarding.router)
 
 @app.get("/health", tags=["health"])
 def health():

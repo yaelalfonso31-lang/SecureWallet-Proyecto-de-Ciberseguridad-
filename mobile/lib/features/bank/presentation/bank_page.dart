@@ -11,7 +11,6 @@ import '../data/bank_repository.dart';
 import 'account_page.dart';
 import 'bank_link_page.dart';
 import 'bank_widgets.dart';
-import 'promotion_detail_page.dart';
 import 'transfer_page.dart';
 
 /// Pestaña "Banco": cuenta, mover dinero, y promociones con canje real.
@@ -337,15 +336,6 @@ class _PromotionsListState extends ConsumerState<_PromotionsList> {
                   busy: _redeeming == p.id,
                   onRedeem: () => _redeem(p, linked),
                   linked: linked,
-                  // Toca la tarjeta para ver el detalle (pantalla del equipo).
-                  onOpenDetail: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => PromotionDetailPage(
-                        promotionId: p.id,
-                        dio: linked ? ref.read(bankAuthDioProvider) : ref.read(bankDioProvider),
-                      ),
-                    ),
-                  ),
                 ),
             ],
           ),
@@ -362,7 +352,6 @@ class _PromoCard extends StatelessWidget {
     required this.busy,
     required this.onRedeem,
     required this.linked,
-    required this.onOpenDetail,
   });
 
   final BankPromotion promo;
@@ -370,7 +359,6 @@ class _PromoCard extends StatelessWidget {
   final bool busy;
   final VoidCallback onRedeem;
   final bool linked;
-  final VoidCallback onOpenDetail;
 
   @override
   Widget build(BuildContext context) {
@@ -402,7 +390,6 @@ class _PromoCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: SoftCard(
-        onTap: onOpenDetail,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

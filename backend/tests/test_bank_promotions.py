@@ -54,7 +54,7 @@ def test_redeem_success(bank_client, bank_customer):
         f"/promotions/{promo_id}/redeem",
         headers=bank_customer["auth_header"],
     )
-    assert r.status_code == 200, r.text
+    assert r.status_code == 201, r.text
     data = r.json()
     assert data["promotion_id"] == promo_id
     assert data["account_id"] == bank_customer["account_id"]
@@ -67,7 +67,7 @@ def test_redeem_duplicate_returns_409(bank_client, bank_customer):
         f"/promotions/{promo_id}/redeem",
         headers=bank_customer["auth_header"],
     )
-    assert r1.status_code == 200
+    assert r1.status_code == 201
 
     r2 = bank_client.post(
         f"/promotions/{promo_id}/redeem",

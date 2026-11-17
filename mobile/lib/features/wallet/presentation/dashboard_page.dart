@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../data/cards_repository.dart';
 import '../data/auth_repository.dart';
 import '../data/demo_wallet_store.dart';
+import '../data/wallet_ledger_repository.dart';
 import 'home_page.dart';
 import 'theme/wallet_palette.dart';
 import 'widgets/balance_card.dart';
@@ -34,6 +35,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   Future<void> _refresh() async {
     ref.invalidate(cardsProvider);
     ref.invalidate(profileProvider);
+    ref.invalidate(walletBalanceProvider);
     await Future<void>.delayed(const Duration(milliseconds: 400));
   }
 
@@ -43,6 +45,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final profile = ref.watch(profileProvider);
     final cards = ref.watch(cardsProvider);
     final settings = ref.watch(securitySettingsProvider);
+    final realBalance = ref.watch(walletBalanceProvider).maybeWhen(data: (b) => b, orElse: () => null);
     final blocked = ref.watch(blockedCardsProvider);
     final defaultId = ref.watch(defaultCardIdProvider);
 
@@ -112,7 +115,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   ),
                   const SizedBox(height: 12),
                   BalanceCard(
-                    balanceCents: wallet.balanceCents,
+                    // Saldo real de la Wallet (recargas y retiros con el Banco); si el backend aún no
+                    // tiene /wallet/balance, se muestra el saldo de demostración.
+                    balanceCents: realBalance ?? wallet.balanceCents,
                     hidden: _hidden,
                     onToggle: () => setState(() => _hidden = !_hidden),
                     onSend: () => context.push('/money/send'),
