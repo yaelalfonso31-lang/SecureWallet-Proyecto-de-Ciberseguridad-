@@ -1,16 +1,36 @@
 import 'package:go_router/go_router.dart';
 
-import '../features/wallet/presentation/home_page.dart';
-import '../features/wallet/presentation/login_page.dart';
-import '../features/wallet/presentation/register_page.dart';
+import '../features/wallet/wallet_routes.dart';
+import 'security/secure_storage.dart';
 
+final _secureStore = SecureStore();
 
-/// TODO equipo Wallet: agregar `redirect` para mandar a /login si no hay token guardado.
+const _publicPaths = <String>{
+  '/splash',
+  '/onboarding',
+  '/login',
+  '/register',
+  '/forgot',
+};
+
 final appRouter = GoRouter(
   initialLocation: '/login',
+  redirect: (context, state) async {
+    final path = state.matchedLocation;
+    if (_publicPaths.contains(path)) {
+      return null;
+    }
+    try {
+      final token = await _secureStore.readToken();
+      if (token == null || token.isEmpty) {
+        return '/login';
+      }
+    } catch (_) {
+      return '/login';
+    }
+    return null;
+  },
   routes: [
-    GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
-    GoRoute(path: '/register', builder: (context, state) => const RegisterPage()),
-    GoRoute(path: '/home', builder: (context, state) => const HomePage()),
+    ...walletRoutes,
   ],
 );

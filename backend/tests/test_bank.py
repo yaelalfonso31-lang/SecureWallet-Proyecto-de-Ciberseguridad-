@@ -176,3 +176,61 @@ def test_payment_without_redemption_charges_full_amount(bank_client):
     assert receipt["charged_cents"] == 1000
     assert receipt["promotion_id"] is None
     assert verify(BANK_PUB, receipt, r.json()["signature"])
+
+def test_get_promotion_detail(bank_client):
+    promos = bank_client.get("/promotions").json()
+    first_id = promos[0]["id"]
+    r = bank_client.get(f"/promotions/{first_id}")
+    assert r.status_code == 200
+    assert r.json()["id"] == first_id
+    assert bank_client.get("/promotions/999999").status_code == 404
+
+
+def test_redeem_promotion_endpoint_and_charge(bank_client, bank_customer):
+    promos = bank_client.get("/promotions").json()
+    promo = promos[0]
+    headers = bank_customer["auth_header"]
+
+    # Sin token rechaza con 401
+    assert bank_client.post(f"/promotions/{promo['id']}/redeem").status_code == 401
+
+    # Canje exitoso
+    r = bank_client.post(f"/promotions/{promo['id']}/redeem", headers=headers)
+    assert r.status_code == 201, r.text
+
+    # No se puede canjear dos veces la misma promoción con la misma cuenta
+    dup = bank_client.post(f"/promotions/{promo['id']}/redeem", headers=headers)
+    assert dup.status_code == 409
+
+    # Al pagar una orden, el Banco aplica el descuento de la promoción canjeada
+    order_payload = signed_order(amount=1000, payer=bank_customer["owner_ref"])
+    pay_res = bank_client.post("/transactions/process", json=order_payload, headers=H)
+    assert pay_res.status_code == 200
+    receipt = pay_res.json()["receipt"]
+    expected_discount = 1000 * promo["discount_percent"] // 100
+    assert receipt["discount_cents"] == expected_discount
+    assert receipt["charged_cents"] == 1000 - expected_discount
+    assert receipt["promotion_id"] == promo["id"]
+
+
+def test_redeem_expired_promotion_returns_400(bank_client, bank_customer):
+    from datetime import timedelta
+    from shared.timeutil import utcnow
+
+    with SessionLocal() as db:
+        expired = Promotion(
+            title="Expirada",
+            description="Ya venció",
+            discount_percent=20,
+            active=True,
+            valid_until=utcnow() - timedelta(days=1),
+        )
+        db.add(expired)
+        db.commit()
+        expired_id = expired.id
+
+    r = bank_client.post(
+        f"/promotions/{expired_id}/redeem",
+        headers=bank_customer["auth_header"],
+    )
+    assert r.status_code == 400
