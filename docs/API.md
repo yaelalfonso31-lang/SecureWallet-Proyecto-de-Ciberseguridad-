@@ -29,8 +29,8 @@ la Wallet, y se envían como `Authorization: Bearer <token>`.
 | POST | `/oauth/token` | — | Canjea `code` + `code_verifier` + `client_id` → `{access_token, token_type, expires_in, scope}` y liga la cuenta (`owner_ref = wallet_user_id`). 400 código inválido/usado/expirado o verifier incorrecto (el código se invalida igual) |
 | GET | `/accounts/me` | JWT Banco `accounts:read` | Saldo, número enmascarado (`•••• 1234`), moneda y estado de la cuenta del dueño del token. 401 sin token, 404 sin cuenta |
 | GET | `/accounts/me/movements` | JWT Banco `accounts:read` | Movimientos del dueño, desc por id (`limit` 1–100, cursor `before`). Anti-IDOR: nunca hay rutas `/accounts/{id}` |
-| GET | `/promotions/{id}` | — | _(pendiente, B4-a)_ Detalle de una promoción |
-| POST | `/promotions/{id}/redeem` | JWT Banco `promotions:redeem` | _(pendiente, B4-a)_ Canje de un solo uso. 400 vencida, 409 ya canjeada |
+| GET | `/promotions/{id}` | — | Detalle de una promoción |
+| POST | `/promotions/{id}/redeem` | JWT Banco `promotions:redeem` | Canje de un solo uso. 400 vencida, 404 inactiva/inexistente, 409 ya canjeada |
 | POST | `/transfers/to-wallet` | JWT Banco `transfers:write` | Recarga a la Wallet → `{voucher, signature}` firmado por el Banco. Idempotente por `idempotency_key`. 402 fondos, 429 límite diario |
 | POST | `/transfers/from-wallet` | JWT Banco `transfers:write` | Retiro desde la Wallet: verifica el comprobante firmado por la Wallet (firma, frescura, nonce y dueño) y abona. 400 firma/expirado, 403 otro dueño, 409 reenvío |
 | GET | `/admin/promotions` | JWT Banco admin | _(pendiente, B6)_ Lista promociones incluidas las inactivas. 403 sin rol admin |

@@ -5,6 +5,7 @@ import '../../../core/network/api_client.dart';
 import '../data/bank_auth_repository.dart';
 import 'account_page.dart';
 import 'bank_link_page.dart';
+import 'promotion_detail_page.dart';
 
 final promotionsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final res = await ref.watch(bankDioProvider).get('/promotions');
@@ -41,6 +42,14 @@ class BankPage extends ConsumerWidget {
                 title: Text('${p['title']}'),
                 subtitle: Text('${p['description']}'),
                 trailing: Text('${p['discount_percent']}%'),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => PromotionDetailPage(
+                      promotionId: p['id'] as int,
+                      dio: ref.read(bankAuthDioProvider),
+                    ),
+                  ),
+                ),
               ),
           ],
         ),
