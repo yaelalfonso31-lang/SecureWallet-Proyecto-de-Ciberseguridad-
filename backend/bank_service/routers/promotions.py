@@ -24,6 +24,19 @@ class PromotionOut(BaseModel):
     valid_until: datetime | None = None
 
 
+class PromotionDetailOut(BaseModel):
+    """Detalle de una promoción (lo usa la pantalla de detalle de la app)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    description: str
+    discount_percent: int
+    active: bool
+    valid_until: datetime | None
+
+
 class RedemptionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -34,8 +47,18 @@ class RedemptionOut(BaseModel):
     used_in_order_id: str | None = None
 
 
+class MyRedemptionOut(BaseModel):
+    promotion_id: int
+    title: str
+    discount_percent: int
+    redeemed_at: datetime
+    used_in_order_id: str | None = None
+    status: str  # pending (se aplicará en la próxima compra) | used
+
+
 @router.get("/promotions", response_model=list[PromotionOut])
 def list_promotions(db: Session = Depends(get_db)):
+    """Promociones activas y vigentes."""
     now = utcnow()
     stmt = select(Promotion).where(
         Promotion.active.is_(True),
@@ -44,7 +67,36 @@ def list_promotions(db: Session = Depends(get_db)):
     return list(db.scalars(stmt))
 
 
-@router.get("/promotions/{promotion_id}", response_model=PromotionOut)
+# Esta ruta va ANTES de "/promotions/{promotion_id}" para que "me" no se interprete como un id.
+@router.get("/promotions/me/redemptions", response_model=list[MyRedemptionOut])
+def my_redemptions(
+    db: Session = Depends(get_db),
+    customer: BankCustomer = Depends(require_scope("promotions:read")),
+):
+    """Canjes de la cuenta del cliente autenticado. Así la app sabe cuáles ya canjeó."""
+    account = db.scalar(select(Account).where(Account.customer_id == customer.id))
+    if account is None:
+        raise HTTPException(404, "Cuenta no encontrada")
+    rows = db.execute(
+        select(PromotionRedemption, Promotion)
+        .join(Promotion, Promotion.id == PromotionRedemption.promotion_id)
+        .where(PromotionRedemption.account_id == account.id)
+        .order_by(PromotionRedemption.id.desc())
+    ).all()
+    return [
+        MyRedemptionOut(
+            promotion_id=promo.id,
+            title=promo.title,
+            discount_percent=promo.discount_percent,
+            redeemed_at=redemption.redeemed_at,
+            used_in_order_id=redemption.used_in_order_id,
+            status="used" if redemption.used_in_order_id else "pending",
+        )
+        for redemption, promo in rows
+    ]
+
+
+@router.get("/promotions/{promotion_id}", response_model=PromotionDetailOut)
 def get_promotion(promotion_id: int, db: Session = Depends(get_db)):
     promo = db.get(Promotion, promotion_id)
     if promo is None or not promo.active:
