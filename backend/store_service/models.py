@@ -15,6 +15,7 @@ class Product(Base):
     description: Mapped[str] = mapped_column(String(300))
     price_cents: Mapped[int] = mapped_column(Integer)
     stock: Mapped[int] = mapped_column(Integer, default=0)
+    category: Mapped[str] = mapped_column(String(40), default="General")
 
 
 class Coupon(Base):
@@ -54,7 +55,7 @@ class Order(Base):
     coupon_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     total_cents: Mapped[int] = mapped_column(Integer)  # lo que realmente se cobra
     currency: Mapped[str] = mapped_column(String(3), default="MXN")
-    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | paid
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | paid | cancelled
     receipt_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     receipt_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

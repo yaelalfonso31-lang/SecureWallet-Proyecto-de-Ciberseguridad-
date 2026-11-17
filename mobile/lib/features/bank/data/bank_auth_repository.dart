@@ -90,6 +90,18 @@ class BankAuthRepository {
     await _tokens.save(token.data['access_token'] as String);
   }
 
+  /// Abre una cuenta nueva del Banco simulado para este usuario de la Wallet y la vincula.
+  /// La Wallet firma quién es el usuario (aserción); después se hace la vinculación normal con PKCE.
+  Future<void> openAccount({required String email, required String password}) async {
+    final assertion = await _walletDio.post<dynamic>('/bank-link/assertion');
+    await _bankDio.post<dynamic>('/customers/open-account', data: {
+      'email': email,
+      'password': password,
+      'wallet_assertion': assertion.data,
+    });
+    await link(email: email, password: password);
+  }
+
   Future<bool> isLinked() async => (await _tokens.read()) != null;
 
   Future<void> unlink() => _tokens.delete();

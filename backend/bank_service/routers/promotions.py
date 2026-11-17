@@ -118,9 +118,9 @@ def redeem_promotion(
         raise HTTPException(403, "Cuenta congelada")
 
     promo = db.get(Promotion, promotion_id)
-    if promo is None:
+    if promo is None or not promo.active:
         raise HTTPException(404, "Promoción no encontrada")
-    if not promo.active or (promo.valid_until is not None and promo.valid_until <= utcnow()):
+    if promo.valid_until is not None and promo.valid_until <= utcnow():
         raise HTTPException(400, "Promoción vencida")
 
     existing = db.scalar(

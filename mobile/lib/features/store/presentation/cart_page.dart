@@ -4,11 +4,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/security/biometric_service.dart';
+import '../../bank/data/bank_repository.dart';
 import '../../wallet/data/cards_repository.dart';
+import '../../wallet/data/wallet_ledger_repository.dart';
+import '../../wallet/presentation/theme/wallet_palette.dart';
+import '../../wallet/presentation/widgets/wallet_widgets.dart';
 import '../data/cart_provider.dart';
 import '../data/store_repository.dart';
-import 'store_page.dart' show formatPrice, productsProvider;
+import 'store_widgets.dart';
 
+/// Carrito: cantidades, cupón, total calculado por el servidor y pago con la Wallet.
 class CartPage extends ConsumerStatefulWidget {
   const CartPage({super.key});
 
@@ -124,7 +129,7 @@ class _CartPageState extends ConsumerState<CartPage> {
         }
       }
 
-      // 2) Ejecutar el flujo completo de pago (Tienda -> Wallet -> Tienda -> Banco).
+      // 2) Flujo completo de pago (Tienda -> Wallet -> Tienda -> Banco).
       final defaultCardId = ref.read(defaultCardIdProvider);
       final result = await ref.read(storeRepositoryProvider).checkoutWithWallet(
             lines,
@@ -141,21 +146,17 @@ class _CartPageState extends ConsumerState<CartPage> {
         return;
       }
 
-      // 3) Limpiar el carrito y refrescar el catálogo para actualizar el stock.
+      // 3) Limpiar el carrito y refrescar todo lo que cambió con la compra.
       ref.read(cartProvider.notifier).clear();
       ref.invalidate(productsProvider);
+      ref.invalidate(ordersProvider);
+      ref.invalidate(bankAccountProvider);
+      ref.invalidate(bankRedemptionsProvider);
+      ref.invalidate(walletBalanceProvider);
       setState(() => _paying = false);
 
-      // 4) Mostrar el recibo firmado por el Banco.
-      await showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        builder: (ctx) => _ReceiptSheet(result: result),
-      );
-
+      // 4) Recibo firmado por el Banco.
+      await showReceiptSheet(context, result);
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
@@ -166,177 +167,59 @@ class _CartPageState extends ConsumerState<CartPage> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    ref.listen(cartProvider, (_, __) => _refresh());
-    final lines = ref.watch(cartProvider);
+  Widget _line(CartLine l, QuoteLine? priced) {
     final cart = ref.read(cartProvider.notifier);
-    final priceByProduct = {for (final l in _quote?.lines ?? const <QuoteLine>[]) l.productId: l};
-    final appliedCoupon = _quote?.couponCode;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Carrito')),
-      body: lines.isEmpty
-          ? const Center(child: Text('Tu carrito está vacío'))
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (_loading || _paying) const LinearProgressIndicator(),
-                for (final l in lines)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(l.name),
-                    subtitle: priceByProduct[l.productId] == null
-                        ? null
-                        : Text(formatPrice(priceByProduct[l.productId]!.unitPriceCents)),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.remove_circle_outline),
-                          onPressed: _paying ? null : () => cart.decrement(l.productId),
-                        ),
-                        Text('${l.quantity}'),
-                        IconButton(
-                          icon: const Icon(Icons.add_circle_outline),
-                          onPressed: (!_paying && l.quantity < kMaxQtyPerProduct)
-                              ? () => cart.add(l.productId, l.name)
-                              : null,
-                        ),
-                        IconButton(
-                          tooltip: 'Quitar',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: _paying ? null : () => cart.remove(l.productId),
-                        ),
-                      ],
-                    ),
-                  ),
-                const Divider(height: 32),
-                if (appliedCoupon != null)
-                  Chip(
-                    avatar: const Icon(Icons.local_offer, size: 18),
-                    label: Text('Cupón $appliedCoupon'),
-                    onDeleted: _paying ? null : _removeCoupon,
-                  )
-                else
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _couponCtrl,
-                          enabled: !_paying,
-                          textCapitalization: TextCapitalization.characters,
-                          maxLength: 32,
-                          decoration: InputDecoration(
-                            labelText: 'Cupón de descuento',
-                            counterText: '',
-                            errorText: _couponError,
-                          ),
-                          onSubmitted: (_) => _applyCoupon(),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: (_loading || _paying) ? null : _applyCoupon,
-                        child: const Text('Aplicar'),
-                      ),
-                    ],
-                  ),
-                const SizedBox(height: 16),
-                if (_error != null) ...[
-                  Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                  const SizedBox(height: 12),
-                ],
-                if (_quote != null) ...[
-                  _row('Subtotal', formatPrice(_quote!.subtotalCents)),
-                  if (_quote!.discountCents > 0)
-                    _row('Descuento cupón', '-${formatPrice(_quote!.discountCents)}'),
-                  const SizedBox(height: 4),
-                  _row('Total', formatPrice(_quote!.totalCents), bold: true),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: (_loading || _paying) ? null : _payWithWallet,
-                    icon: _paying
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.fingerprint),
-                    label: Text(
-                      _paying
-                          ? 'Procesando pago seguro…'
-                          : 'Pagar con Wallet (${formatPrice(_quote!.totalCents)})',
-                    ),
-                  ),
-                ],
-              ],
-            ),
-    );
-  }
-
-  Widget _row(String label, String value, {bool bold = false}) {
-    final style = bold ? Theme.of(context).textTheme.titleMedium : null;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [Text(label, style: style), Text(value, style: style)],
-      ),
-    );
-  }
-}
-
-class _ReceiptSheet extends StatelessWidget {
-  const _ReceiptSheet({required this.result});
-
-  final PaymentResult result;
-
-  @override
-  Widget build(BuildContext context) {
-    final receipt = result.receipt;
-    final amountCents = (receipt['amount_cents'] as int?) ?? 0;
-    final bankDiscountCents = (receipt['discount_cents'] as int?) ?? 0;
-    final chargedCents = (receipt['charged_cents'] as int?) ?? amountCents;
-    final receiptId = '${receipt['receipt_id'] ?? ''}';
-    final orderHash = '${receipt['order_hash'] ?? ''}';
-
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: const EdgeInsets.only(bottom: 10),
+      child: SoftCard(
+        padding: const EdgeInsets.all(12),
+        child: Row(
           children: [
-            const Icon(Icons.verified_rounded, color: Colors.green, size: 56),
-            const SizedBox(height: 12),
-            Text(
-              '¡Pago aprobado!',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Firma Ed25519 del Banco verificada',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.green, fontWeight: FontWeight.w600),
-            ),
-            const Divider(height: 28),
-            _detail('Orden', result.orderId),
-            _detail('Recibo', receiptId),
-            _detail('Monto de la orden', formatPrice(amountCents)),
-            if (bankDiscountCents > 0)
-              _detail('Descuento promoción Banco', '-${formatPrice(bankDiscountCents)}'),
-            _detail('Total cargado en Banco', formatPrice(chargedCents), bold: true),
-            if (orderHash.isNotEmpty)
-              _detail(
-                'Hash SHA-256 orden',
-                orderHash.length > 16 ? '${orderHash.substring(0, 16)}…' : orderHash,
+            IconBadge(iconForName(l.name), size: 48, color: WalletColors.navy, background: WalletColors.yellowSoft),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: WalletColors.ink),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    priced == null ? '…' : formatPrice(priced.lineTotalCents),
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: WalletColors.blue),
+                  ),
+                ],
               ),
-            const SizedBox(height: 20),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Listo'),
+            ),
+            Container(
+              decoration: BoxDecoration(color: WalletColors.ice, borderRadius: BorderRadius.circular(14)),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Quitar uno',
+                    icon: const Icon(Icons.remove_rounded),
+                    onPressed: _paying ? null : () => cart.decrement(l.productId),
+                  ),
+                  Text('${l.quantity}', style: const TextStyle(fontWeight: FontWeight.w900)),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Agregar uno',
+                    icon: const Icon(Icons.add_rounded),
+                    onPressed: (!_paying && l.quantity < kMaxQtyPerProduct) ? () => cart.add(l.productId, l.name) : null,
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Eliminar',
+              icon: const Icon(Icons.delete_outline_rounded, color: WalletColors.danger),
+              onPressed: _paying ? null : () => cart.remove(l.productId),
             ),
           ],
         ),
@@ -344,18 +227,154 @@ class _ReceiptSheet extends StatelessWidget {
     );
   }
 
-  Widget _detail(String label, String value, {bool bold = false}) {
-    final style = bold ? const TextStyle(fontWeight: FontWeight.bold) : null;
+  Widget _row(String label, String value, {bool bold = false, Color? color}) {
+    final style = TextStyle(
+      fontSize: bold ? 18 : 14,
+      fontWeight: bold ? FontWeight.w900 : FontWeight.w600,
+      color: color ?? (bold ? WalletColors.ink : WalletColors.muted),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: style),
-          const SizedBox(width: 12),
-          Flexible(child: Text(value, textAlign: TextAlign.right, style: style)),
-        ],
+        children: [Text(label, style: style), Text(value, style: style)],
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(cartProvider, (previous, next) => _refresh());
+    final lines = ref.watch(cartProvider);
+    final priceByProduct = {for (final l in _quote?.lines ?? const <QuoteLine>[]) l.productId: l};
+    final appliedCoupon = _quote?.couponCode;
+    final pendingPromos = ref.watch(bankRedemptionsProvider).maybeWhen(
+          data: (m) => m.values.where((r) => r.isPending).toList(),
+          orElse: () => const <BankRedemption>[],
+        );
+
+    return Scaffold(
+      backgroundColor: WalletColors.background,
+      appBar: AppBar(title: const Text('Mi carrito')),
+      body: lines.isEmpty
+          ? EmptyState(
+              icon: Icons.remove_shopping_cart_rounded,
+              title: 'Tu carrito está vacío',
+              message: 'Explora el catálogo y agrega lo que te guste.',
+              actionLabel: 'Ver productos',
+              actionIcon: Icons.storefront_rounded,
+              onAction: () => Navigator.of(context).pop(),
+            )
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (_loading || _paying) ...[
+                  const LinearProgressIndicator(color: WalletColors.yellow),
+                  const SizedBox(height: 10),
+                ],
+                for (final l in lines) _line(l, priceByProduct[l.productId]),
+                const SizedBox(height: 6),
+                SoftCard(
+                  padding: const EdgeInsets.all(14),
+                  child: appliedCoupon != null
+                      ? Row(
+                          children: [
+                            const IconBadge(Icons.local_offer_rounded, size: 40, color: WalletColors.navy, background: WalletColors.yellowSoft),
+                            const SizedBox(width: 12),
+                            Expanded(child: Text('Cupón $appliedCoupon aplicado', style: WalletText.h3)),
+                            IconButton(
+                              tooltip: 'Quitar cupón',
+                              icon: const Icon(Icons.close_rounded),
+                              onPressed: _paying ? null : _removeCoupon,
+                            ),
+                          ],
+                        )
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _couponCtrl,
+                                enabled: !_paying,
+                                textCapitalization: TextCapitalization.characters,
+                                maxLength: 32,
+                                onSubmitted: (_) => _applyCoupon(),
+                                decoration: InputDecoration(
+                                  labelText: '¿Tienes un cupón?',
+                                  counterText: '',
+                                  errorText: _couponError,
+                                  prefixIcon: const Icon(Icons.local_offer_rounded, color: WalletColors.blue),
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            SizedBox(
+                              height: 56,
+                              child: FilledButton(
+                                onPressed: (_loading || _paying) ? null : _applyCoupon,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: WalletColors.blue,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                ),
+                                child: const Text('Aplicar'),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+                if (pendingPromos.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  InfoBanner(
+                    kind: BannerKind.success,
+                    icon: Icons.redeem_rounded,
+                    text: 'Tienes la promoción "${pendingPromos.first.title}" (${pendingPromos.first.discountPercent}%) canjeada: '
+                        'el Banco la aplicará sola al cobrar.',
+                  ),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  InfoBanner(kind: BannerKind.danger, text: _error!),
+                ],
+                if (_quote != null) ...[
+                  const SizedBox(height: 14),
+                  SoftCard(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        _row('Subtotal', formatPrice(_quote!.subtotalCents)),
+                        if (_quote!.discountCents > 0)
+                          _row('Descuento por cupón', '-${formatPrice(_quote!.discountCents)}', color: WalletColors.success),
+                        const Divider(height: 20),
+                        _row('Total', formatPrice(_quote!.totalCents), bold: true),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  PrimaryButton(
+                    label: _paying ? 'Procesando pago seguro…' : 'Pagar con Wallet · ${formatPrice(_quote!.totalCents)}',
+                    icon: Icons.fingerprint_rounded,
+                    loading: _paying,
+                    onPressed: _loading ? null : _payWithWallet,
+                  ),
+                  const SizedBox(height: 10),
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.lock_rounded, size: 14, color: WalletColors.muted),
+                      SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'Tu Wallet firma la orden y el Banco emite un recibo firmado',
+                          textAlign: TextAlign.center,
+                          style: WalletText.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
     );
   }
 }

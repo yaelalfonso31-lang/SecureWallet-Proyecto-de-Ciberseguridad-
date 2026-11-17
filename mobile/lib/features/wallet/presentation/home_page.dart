@@ -38,7 +38,8 @@ class HomePage extends ConsumerWidget {
     final index = ref.watch(homeTabProvider);
     return Scaffold(
       backgroundColor: WalletColors.background,
-      appBar: index == 0
+      // Inicio, Banco y Tienda traen su propio encabezado; Tarjetas y Perfil usan la barra superior.
+      appBar: (index == 0 || index == 2 || index == 3)
           ? null
           : AppBar(
               backgroundColor: WalletColors.navy,
