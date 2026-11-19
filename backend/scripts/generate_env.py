@@ -44,7 +44,10 @@ BANK_SIGNING_PRIVATE_KEY={bank_priv}
 BANK_SIGNING_PUBLIC_KEY={bank_pub}
 
 BANK_API_KEY={secrets.token_urlsafe(32)}
-BANK_URL=http://localhost:8002
+BANK_URL=https://localhost:8002
+MTLS_CA_CERT=certs/ca.pem
+MTLS_STORE_CERT=certs/store.pem
+MTLS_STORE_KEY=certs/store.key
 """
     TARGET.write_text(content, encoding="utf-8")
     print(f"Listo: {TARGET} creado con secretos nuevos. No lo subas a GitHub.")
