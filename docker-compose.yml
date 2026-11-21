@@ -27,10 +27,12 @@ services:
 
   bank:
     build: ./backend
-    command: uvicorn bank_service.main:app --host 0.0.0.0 --port 8002
+    command: uvicorn bank_service.main:app --host 0.0.0.0 --port 8002 --ssl-keyfile certs/bank.key --ssl-certfile certs/bank.pem --ssl-ca-certs certs/ca.pem --ssl-cert-reqs 2
     env_file: ./backend/.env
     environment:
       BANK_DATABASE_URL: postgresql+psycopg://securewallet:${POSTGRES_PASSWORD:-devpassword}@db:5432/bank_db
+    volumes:
+      - ./backend/certs:/app/certs:ro
     ports: ["8002:8002"]
     depends_on:
       db: { condition: service_healthy }
@@ -41,7 +43,9 @@ services:
     env_file: ./backend/.env
     environment:
       STORE_DATABASE_URL: postgresql+psycopg://securewallet:${POSTGRES_PASSWORD:-devpassword}@db:5432/store_db
-      BANK_URL: http://bank:8002
+      BANK_URL: https://bank:8002
+    volumes:
+      - ./backend/certs:/app/certs:ro
     ports: ["8003:8003"]
     depends_on:
       db: { condition: service_healthy }

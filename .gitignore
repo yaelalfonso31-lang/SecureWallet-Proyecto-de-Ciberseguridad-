@@ -4,6 +4,10 @@
 !.env.example
 *.pem
 *.key
+*.csr
+*.srl
+certs/
+backend/certs/
 *.jks
 *.keystore
 key.properties
