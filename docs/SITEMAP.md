@@ -1,6 +1,6 @@
 # Mapa de sitio (pantallas)
 
-Estado: ✅ ya existe en el esqueleto · 🔲 por construir
+Estado: ✅ ya existe en el proyecto · 🔲 por construir / opcional
 
 ## Acceso
 - ✅ Login · ✅ Registro · 🔲 Splash + verificación root/jailbreak · 🔲 Onboarding · 🔲 Verificación OTP · 🔲 Configurar PIN/biometría · 🔲 2FA (TOTP) · 🔲 Recuperar contraseña · 🔲 Cuenta bloqueada
@@ -13,8 +13,13 @@ Estado: ✅ ya existe en el esqueleto · 🔲 por construir
 - 🔲 Historial (filtros, detalle, verificar comprobante, exportar PDF firmado) · 🔲 Contactos
 
 ## Banco (Equipo Banco)
-- ✅ Promociones · 🔲 Detalle y canje de promoción · 🔲 Resumen de cuentas y movimientos
-- 🔲 Transferencias banco ↔ wallet · 🔲 Notificaciones · 🔲 Panel admin (opcional)
+- ✅ Tablero principal del Banco y lista de promociones (`bank_page.dart`)
+- ✅ Detalle y canje biométrico de promoción (`promotion_detail_page.dart`)
+- ✅ Resumen de cuenta, saldo y movimientos (`account_page.dart`)
+- ✅ Transferencias banco ↔ wallet: recargas y retiros (`transfer_page.dart`)
+- ✅ Vinculación de cuenta OAuth2 + PKCE y apertura de cuenta demo (`bank_link_page.dart`)
+- ✅ Panel admin en app (gestionado vía Swagger `/docs` y CLI `bank_admin.py`)
+- 🔲 Notificaciones 
 
 ## Tienda (Equipo Tienda)
 - ✅ Catálogo · 🔲 Detalle · 🔲 Búsqueda/filtros · 🔲 Carrito + cupones

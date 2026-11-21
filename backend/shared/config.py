@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     bank_api_key: str = ""
     bank_url: str = "http://localhost:8002"
 
+    # mTLS Tienda -> Banco (B7)
+    mtls_ca_cert: str = "certs/ca.pem"
+    mtls_store_cert: str = "certs/store.pem"
+    mtls_store_key: str = "certs/store.key"
+    mtls_bank_cert: str = "certs/bank.pem"
+    mtls_bank_key: str = "certs/bank.key"
+
     max_failed_logins: int = 5
     lockout_minutes: int = 15
     order_max_age_seconds: int = 120

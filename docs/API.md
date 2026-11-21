@@ -28,7 +28,7 @@ la Wallet, y se envían como `Authorization: Bearer <token>`.
 |---|---|---|---|
 | GET | `/promotions` | — | Bonos y promociones activas |
 | GET | `/bank/public-key` | — | Clave pública Ed25519 del Banco |
-| POST | `/transactions/process` | `X-API-Key` | Procesa orden firmada → `{receipt, signature}`. 400 firma/expirada, 402 fondos, 403 cuenta congelada, 404 sin cuenta, 409 repetida. Cada cargo deja un `Movement`. Si hay canje pendiente, aplica el descuento y el recibo incluye `discount_cents`, `charged_cents` y `promotion_id` (`amount_cents` no cambia) |
+| POST | `/transactions/process` | `X-API-Key` + mTLS | Procesa orden firmada → `{receipt, signature}`. Requiere certificado de cliente TLS emitido por la CA interna (`CN=store`). 400 firma/expirada, 402 fondos, 403 cuenta congelada, 404 sin cuenta, 409 repetida. Cada cargo deja un `Movement`. Si hay canje pendiente, aplica el descuento y el recibo incluye `discount_cents`, `charged_cents` y `promotion_id` (`amount_cents` no cambia) |
 | POST | `/oauth/authorize` | contraseña + aserción Wallet | Login + PKCE (`S256`) → `{code, state}`. Código de un solo uso, 60 s. 400 credenciales/aserción/`client_id`/método, 403 cuenta congelada, 409 usuario Wallet ya ligado a otra cuenta, 423 bloqueado |
 | POST | `/oauth/token` | — | Canjea `code` + `code_verifier` + `client_id` → `{access_token, token_type, expires_in, scope}` y liga la cuenta (`owner_ref = wallet_user_id`). 400 código inválido/usado/expirado o verifier incorrecto (el código se invalida igual) |
 | GET | `/accounts/me` | JWT Banco `accounts:read` | Saldo, número enmascarado (`•••• 1234`), moneda y estado de la cuenta del dueño del token. 401 sin token, 404 sin cuenta |
@@ -39,8 +39,9 @@ la Wallet, y se envían como `Authorization: Bearer <token>`.
 | POST | `/customers/open-account` | aserción Wallet | **Abre cliente y cuenta desde la app.** Body: `{email, password (≥10, letras y números), wallet_assertion}`. Crea la cuenta con `BANK_OPEN_ACCOUNT_BALANCE_CENTS` (por defecto $5,000 de demostración) y un movimiento de apertura. Después la app hace la vinculación normal (`/oauth/authorize` + `/oauth/token`). 400 aserción inválida/vencida, 409 el usuario Wallet ya tiene cuenta o el correo ya existe, 422 contraseña débil |
 | POST | `/transfers/to-wallet` | JWT Banco `transfers:write` | Recarga a la Wallet → `{voucher, signature}` firmado por el Banco. Idempotente por `idempotency_key`. 402 fondos, 429 límite diario |
 | POST | `/transfers/from-wallet` | JWT Banco `transfers:write` | Retiro desde la Wallet: verifica el comprobante firmado por la Wallet (firma, frescura, nonce y dueño) y abona. 400 firma/expirado, 403 otro dueño, 409 reenvío |
-| GET | `/admin/promotions` | JWT Banco admin | Lista promociones incluidas las inactivas y vencidas. 403 sin rol admin |
-| POST | `/admin/promotions` | JWT Banco admin | Crea promoción. 422 si `discount_percent` no está entre 1 y 100 |
+| GET | `/admin/promotions` | JWT Banco admin | Lista promociones incluidas las inactivas. 403 sin rol admin |
+| POST | `/admin/promotions` | JWT Banco admin | Crea promoción. 422 validación de rangos |
+
 | PATCH | `/admin/promotions/{id}` | JWT Banco admin | Edita o desactiva promoción. 404 si no existe |
 
 ### Vinculación Wallet ↔ Banco
@@ -62,6 +63,38 @@ El Banco exige firma válida, `audience == "bank"` y `timestamp` con menos de 12
 
 Para obtener un token de administrador en desarrollo: `python scripts/bank_admin.py --email admin@banco.com`
 (imprime un token de 15 minutos para usarlo en `http://localhost:8002/docs` → Authorize).
+
+### Canal seguro mTLS Tienda ↔ Banco (B7)
+
+La comunicación interservicio entre la Tienda y el Banco (`POST /transactions/process`) está protegida por TLS Mutuo (mTLS), además de la cabecera `X-API-Key`.
+
+1. **Generación de certificados:**
+   ```bash
+   # En Linux / Mac / Git Bash:
+   bash scripts/make_certs.sh
+   # O en Windows / cualquier entorno con Python:
+   python scripts/make_certs.py
+   ```
+   Crea la CA interna y los certificados en `backend/certs/` (`ca.pem`, `bank.pem`, `bank.key`, `store.pem`, `store.key`).
+
+2. **Arranque del Banco con mTLS:**
+   ```bash
+   uvicorn bank_service.main:app --port 8002 --ssl-keyfile certs/bank.key --ssl-certfile certs/bank.pem --ssl-ca-certs certs/ca.pem --ssl-cert-reqs 2
+   ```
+
+3. **Demostración de seguridad (Prueba de handshake):**
+   - **Petición rechazada sin certificado de cliente:**
+     ```bash
+     curl https://localhost:8002/bank/public-key --cacert certs/ca.pem
+     # Error esperado: el handshake TLS falla (el servidor Banco exige certificado de cliente y aborta la conexión).
+     ```
+   - **Petición autorizada con certificado de la Tienda:**
+     ```bash
+     curl https://localhost:8002/bank/public-key --cacert certs/ca.pem --cert certs/store.pem --key certs/store.key
+     # Respuesta 200 OK con la clave pública Ed25519 del Banco.
+     ```
+
+
 
 ## Tienda — `:8003`
 
