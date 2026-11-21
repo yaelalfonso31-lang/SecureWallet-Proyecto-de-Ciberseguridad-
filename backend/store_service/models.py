@@ -59,3 +59,14 @@ class Order(Base):
     receipt_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     receipt_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+class SpentTicket(Base):
+    """Tickets ya aceptados por la Tienda (prevención local de doble gasto)."""
+
+    __tablename__ = "spent_tickets"
+
+    ticket_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    order_id: Mapped[str] = mapped_column(String(64), index=True)
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    ticket_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    redeemed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -128,3 +128,24 @@ class ProcessedOrder(Base):
     amount_cents: Mapped[int] = mapped_column(Integer)
     receipt_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class BankTicket(Base):
+    """Ticket electrónico prepagado emitido por el Banco (un solo uso)."""
+
+    __tablename__ = "bank_tickets"
+
+    ticket_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    owner_ref: Mapped[str] = mapped_column(String(64), index=True)
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3), default="MXN")
+    nonce: Mapped[str] = mapped_column(String(64), unique=True)
+    ticket_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    ticket_json: Mapped[str] = mapped_column(Text)
+    signature: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active | spent
+    spent_in_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    spent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

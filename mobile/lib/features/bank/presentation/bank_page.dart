@@ -12,6 +12,7 @@ import 'account_page.dart';
 import 'bank_link_page.dart';
 import 'bank_widgets.dart';
 import 'transfer_page.dart';
+import 'tickets_page.dart';
 
 /// Pestaña "Banco": cuenta, mover dinero, y promociones con canje real.
 class BankPage extends ConsumerWidget {
@@ -23,12 +24,15 @@ class BankPage extends ConsumerWidget {
     ref.invalidate(bankPromotionsProvider);
     ref.invalidate(bankRedemptionsProvider);
     ref.invalidate(walletBalanceProvider);
+    ref.invalidate(bankTicketsProvider);
     await Future<void>.delayed(const Duration(milliseconds: 400));
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final linked = ref.watch(bankLinkedProvider).maybeWhen(data: (v) => v, orElse: () => false);
+    final linked = ref
+        .watch(bankLinkedProvider)
+        .maybeWhen(data: (v) => v, orElse: () => false);
 
     return RefreshIndicator(
       color: WalletColors.blue,
@@ -45,14 +49,25 @@ class BankPage extends ConsumerWidget {
                 children: [
                   const Row(
                     children: [
-                      IconBadge(Icons.account_balance_rounded, size: 44, color: WalletColors.navy, background: WalletColors.yellow),
+                      IconBadge(Icons.account_balance_rounded,
+                          size: 44,
+                          color: WalletColors.navy,
+                          background: WalletColors.yellow),
                       SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Banco Azul', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
-                            Text('Banca simulada', style: TextStyle(color: WalletColors.yellow, fontSize: 12, fontWeight: FontWeight.w700)),
+                            Text('Banco Azul',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w900)),
+                            Text('Banca simulada',
+                                style: TextStyle(
+                                    color: WalletColors.yellow,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700)),
                           ],
                         ),
                       ),
@@ -68,6 +83,38 @@ class BankPage extends ConsumerWidget {
             const SizedBox(height: 14),
             const _QuickActions(),
             const _BalancesRow(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: SoftCard(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const TicketsPage()),
+                ),
+                child: const Row(
+                  children: [
+                    IconBadge(
+                      Icons.confirmation_number_rounded,
+                      size: 46,
+                      color: WalletColors.navy,
+                      background: WalletColors.yellow,
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Tickets electrónicos', style: WalletText.h3),
+                          Text(
+                              'Compra tickets de \$50, \$100, \$200 o \$500 para la Tienda',
+                              style: WalletText.muted),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right_rounded,
+                        color: WalletColors.muted),
+                  ],
+                ),
+              ),
+            ),
           ],
           const SectionTitle('Promociones'),
           const _PromotionsList(),
@@ -92,11 +139,18 @@ class _LinkSection extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Conecta tu cuenta', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900)),
+          const Text('Conecta tu cuenta',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
           Text(
             'Vincula tu cuenta o abre una nueva para recargar tu Wallet, pagar en la tienda y canjear promociones.',
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 14, height: 1.35),
+            style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.85),
+                fontSize: 14,
+                height: 1.35),
           ),
           const SizedBox(height: 16),
           PrimaryButton(
@@ -137,7 +191,8 @@ class _AccountSectionState extends ConsumerState<_AccountSection> {
         height: 150,
         child: Center(child: CircularProgressIndicator(color: Colors.white)),
       ),
-      error: (e, _) => InfoBanner(kind: BannerKind.danger, text: errorMessage(e)),
+      error: (e, _) =>
+          InfoBanner(kind: BannerKind.danger, text: errorMessage(e)),
       data: (a) => Column(
         children: [
           BankAccountCard(account: a, hidden: _hidden),
@@ -146,7 +201,11 @@ class _AccountSectionState extends ConsumerState<_AccountSection> {
             child: TextButton.icon(
               style: TextButton.styleFrom(foregroundColor: Colors.white),
               onPressed: () => setState(() => _hidden = !_hidden),
-              icon: Icon(_hidden ? Icons.visibility_rounded : Icons.visibility_off_rounded, size: 18),
+              icon: Icon(
+                  _hidden
+                      ? Icons.visibility_rounded
+                      : Icons.visibility_off_rounded,
+                  size: 18),
               label: Text(_hidden ? 'Mostrar saldo' : 'Ocultar saldo'),
             ),
           ),
@@ -186,7 +245,8 @@ class _QuickActions extends ConsumerWidget {
         QuickAction(
           icon: Icons.north_east_rounded,
           label: 'Retirar',
-          onTap: () => _open(context, const TransferPage(initialWithdraw: true)),
+          onTap: () =>
+              _open(context, const TransferPage(initialWithdraw: true)),
         ),
         QuickAction(
           icon: Icons.link_off_rounded,
@@ -196,7 +256,8 @@ class _QuickActions extends ConsumerWidget {
             final ok = await confirmDialog(
               context,
               title: 'Desvincular cuenta',
-              message: 'La app dejará de acceder a tu cuenta del Banco. Podrás vincularla de nuevo cuando quieras.',
+              message:
+                  'La app dejará de acceder a tu cuenta del Banco. Podrás vincularla de nuevo cuando quieras.',
               confirmLabel: 'Desvincular',
               danger: true,
             );
@@ -216,8 +277,12 @@ class _BalancesRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final bank = ref.watch(bankAccountProvider).maybeWhen(data: (a) => a.balanceCents, orElse: () => null);
-    final wallet = ref.watch(walletBalanceProvider).maybeWhen(data: (b) => b, orElse: () => null);
+    final bank = ref
+        .watch(bankAccountProvider)
+        .maybeWhen(data: (a) => a.balanceCents, orElse: () => null);
+    final wallet = ref
+        .watch(walletBalanceProvider)
+        .maybeWhen(data: (b) => b, orElse: () => null);
 
     Widget tile(IconData icon, String label, int? cents, bool yellow) {
       return Expanded(
@@ -241,7 +306,8 @@ class _BalancesRow extends ConsumerWidget {
                       fit: BoxFit.scaleDown,
                       child: Text(
                         cents == null ? '—' : formatMoney(cents),
-                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w900, fontSize: 16),
                       ),
                     ),
                   ],
@@ -259,7 +325,8 @@ class _BalancesRow extends ConsumerWidget {
         children: [
           tile(Icons.account_balance_rounded, 'En el Banco', bank, false),
           const SizedBox(width: 12),
-          tile(Icons.account_balance_wallet_rounded, 'En la Wallet', wallet, true),
+          tile(Icons.account_balance_wallet_rounded, 'En la Wallet', wallet,
+              true),
         ],
       ),
     );
@@ -293,7 +360,8 @@ class _PromotionsListState extends ConsumerState<_PromotionsList> {
       await ref.read(bankRepositoryProvider).redeem(promo.id);
       ref.invalidate(bankRedemptionsProvider);
       if (mounted) {
-        showWalletSnack(context, '¡Canjeada! Se aplicará sola en tu próxima compra de la Tienda');
+        showWalletSnack(context,
+            '¡Canjeada! Se aplicará sola en tu próxima compra de la Tienda');
       }
     } catch (e) {
       if (mounted) showWalletSnack(context, errorMessage(e), error: true);
@@ -305,14 +373,18 @@ class _PromotionsListState extends ConsumerState<_PromotionsList> {
   @override
   Widget build(BuildContext context) {
     final promos = ref.watch(bankPromotionsProvider);
-    final linked = ref.watch(bankLinkedProvider).maybeWhen(data: (v) => v, orElse: () => false);
+    final linked = ref
+        .watch(bankLinkedProvider)
+        .maybeWhen(data: (v) => v, orElse: () => false);
     final redemptions = ref.watch(bankRedemptionsProvider).maybeWhen(
           data: (m) => m,
           orElse: () => const <int, BankRedemption>{},
         );
 
     return promos.when(
-      loading: () => const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator())),
+      loading: () => const Padding(
+          padding: EdgeInsets.all(32),
+          child: Center(child: CircularProgressIndicator())),
       error: (e, _) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: InfoBanner(kind: BannerKind.danger, text: errorMessage(e)),
@@ -322,7 +394,8 @@ class _PromotionsListState extends ConsumerState<_PromotionsList> {
           return const EmptyState(
             icon: Icons.local_offer_rounded,
             title: 'Sin promociones por ahora',
-            message: 'Cuando el Banco publique nuevas promociones las verás aquí.',
+            message:
+                'Cuando el Banco publique nuevas promociones las verás aquí.',
           );
         }
         return Padding(
@@ -365,22 +438,32 @@ class _PromoCard extends StatelessWidget {
     final r = redemption;
     Widget action;
     if (r != null && r.isPending) {
-      action = const StatusChip(label: 'Canjeada · se aplica en tu próxima compra', icon: Icons.check_circle_rounded);
+      action = const StatusChip(
+          label: 'Canjeada · se aplica en tu próxima compra',
+          icon: Icons.check_circle_rounded);
     } else if (r != null) {
-      action = const StatusChip(label: 'Ya la usaste', color: WalletColors.muted, icon: Icons.done_all_rounded);
+      action = const StatusChip(
+          label: 'Ya la usaste',
+          color: WalletColors.muted,
+          icon: Icons.done_all_rounded);
     } else {
       action = SizedBox(
         height: 40,
         child: FilledButton.icon(
           onPressed: busy ? null : onRedeem,
           icon: busy
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : Icon(linked ? Icons.redeem_rounded : Icons.link_rounded, size: 18),
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : Icon(linked ? Icons.redeem_rounded : Icons.link_rounded,
+                  size: 18),
           label: Text(linked ? 'Canjear' : 'Vincular para canjear'),
           style: FilledButton.styleFrom(
             backgroundColor: WalletColors.yellow,
             foregroundColor: WalletColors.ink,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             textStyle: const TextStyle(fontWeight: FontWeight.w800),
           ),
         ),
@@ -399,14 +482,23 @@ class _PromoCard extends StatelessWidget {
                 Container(
                   width: 62,
                   padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(gradient: WalletColors.goldGradient, borderRadius: BorderRadius.circular(16)),
+                  decoration: BoxDecoration(
+                      gradient: WalletColors.goldGradient,
+                      borderRadius: BorderRadius.circular(16)),
                   child: Column(
                     children: [
                       Text(
                         '${promo.discountPercent}%',
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: WalletColors.navy),
+                        style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: WalletColors.navy),
                       ),
-                      const Text('OFF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: WalletColors.navy)),
+                      const Text('OFF',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: WalletColors.navy)),
                     ],
                   ),
                 ),
@@ -420,7 +512,8 @@ class _PromoCard extends StatelessWidget {
                       Text(promo.description, style: WalletText.muted),
                       if (promo.validUntil != null) ...[
                         const SizedBox(height: 4),
-                        Text('Vence ${formatDate(promo.validUntil!.toLocal())}', style: WalletText.muted),
+                        Text('Vence ${formatDate(promo.validUntil!.toLocal())}',
+                            style: WalletText.muted),
                       ],
                     ],
                   ),

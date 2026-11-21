@@ -25,6 +25,8 @@ ALL_SCOPES = (
     "promotions:read",
     "promotions:redeem",
     "transfers:write",
+    "tickets:read",
+    "tickets:write",
 )
 
 

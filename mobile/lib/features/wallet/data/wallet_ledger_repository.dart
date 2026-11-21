@@ -13,7 +13,8 @@ class WalletLedgerMovement {
     required this.createdAt,
   });
 
-  factory WalletLedgerMovement.fromJson(Map<String, dynamic> json) => WalletLedgerMovement(
+  factory WalletLedgerMovement.fromJson(Map<String, dynamic> json) =>
+      WalletLedgerMovement(
         id: json['id'] as int,
         kind: json['kind'] as String,
         amountCents: json['amount_cents'] as int,
@@ -43,7 +44,8 @@ class WalletLedgerRepository {
     return (res.data as Map<String, dynamic>)['balance_cents'] as int;
   }
 
-  Future<List<WalletLedgerMovement>> movements({int limit = 20, int? before}) async {
+  Future<List<WalletLedgerMovement>> movements(
+      {int limit = 20, int? before}) async {
     final res = await _dio.get<dynamic>(
       '/wallet/movements',
       queryParameters: {'limit': limit, if (before != null) 'before': before},
@@ -63,7 +65,8 @@ class WalletLedgerRepository {
 
   /// Descuenta el saldo y devuelve el comprobante `{voucher, signature}` firmado por la Wallet.
   Future<Map<String, dynamic>> withdraw(int amountCents) async {
-    final res = await _dio.post<dynamic>('/wallet/withdraw', data: {'amount_cents': amountCents});
+    final res = await _dio
+        .post<dynamic>('/wallet/withdraw', data: {'amount_cents': amountCents});
     return Map<String, dynamic>.from(res.data as Map);
   }
 }

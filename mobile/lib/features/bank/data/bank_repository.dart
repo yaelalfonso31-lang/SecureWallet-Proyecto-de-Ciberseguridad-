@@ -68,7 +68,9 @@ class BankPromotion {
         title: json['title'] as String,
         description: json['description'] as String,
         discountPercent: json['discount_percent'] as int,
-        validUntil: json['valid_until'] == null ? null : DateTime.parse(json['valid_until'] as String),
+        validUntil: json['valid_until'] == null
+            ? null
+            : DateTime.parse(json['valid_until'] as String),
       );
 
   final int id;
@@ -107,14 +109,49 @@ class BankRedemption {
 
 /// Resultado de mover dinero entre el Banco y la Wallet.
 class TransferOutcome {
-  const TransferOutcome({required this.walletBalanceCents, required this.bankBalanceCents});
+  const TransferOutcome(
+      {required this.walletBalanceCents, required this.bankBalanceCents});
 
   final int walletBalanceCents;
   final int bankBalanceCents;
 }
 
+/// Ticket electrónico prepagado emitido y firmado por el Banco.
+class BankTicket {
+  const BankTicket({
+    required this.ticket,
+    required this.signature,
+    required this.status,
+    this.spentInOrderId,
+  });
+
+  factory BankTicket.fromJson(Map<String, dynamic> json) => BankTicket(
+        ticket: Map<String, dynamic>.from(json['ticket'] as Map),
+        signature: json['signature'] as String,
+        status: json['status'] as String,
+        spentInOrderId: json['spent_in_order_id'] as String?,
+      );
+
+  final Map<String, dynamic> ticket;
+  final String signature;
+  final String status; // active | spent
+  final String? spentInOrderId;
+
+  String get ticketId => ticket['ticket_id'] as String;
+  int get amountCents => ticket['amount_cents'] as int;
+  bool get isActive => status == 'active';
+
+  Map<String, dynamic> toSignedPayload() => {
+        'ticket': ticket,
+        'signature': signature,
+      };
+}
+
 class BankRepository {
-  BankRepository({required Dio publicDio, required Dio authDio, required WalletLedgerRepository ledger})
+  BankRepository(
+      {required Dio publicDio,
+      required Dio authDio,
+      required WalletLedgerRepository ledger})
       : _publicDio = publicDio,
         _authDio = authDio,
         _ledger = ledger;
@@ -133,12 +170,18 @@ class BankRepository {
       '/accounts/me/movements',
       queryParameters: {'limit': limit, if (before != null) 'before': before},
     );
-    return [for (final m in res.data as List<dynamic>) BankMovement.fromJson(m as Map<String, dynamic>)];
+    return [
+      for (final m in res.data as List<dynamic>)
+        BankMovement.fromJson(m as Map<String, dynamic>)
+    ];
   }
 
   Future<List<BankPromotion>> promotions() async {
     final res = await _publicDio.get<dynamic>('/promotions');
-    return [for (final p in res.data as List<dynamic>) BankPromotion.fromJson(p as Map<String, dynamic>)];
+    return [
+      for (final p in res.data as List<dynamic>)
+        BankPromotion.fromJson(p as Map<String, dynamic>)
+    ];
   }
 
   /// Canjes propios, por id de promoción.
@@ -167,17 +210,20 @@ class BankRepository {
     // una vez, y el backend no abona dos veces el mismo comprobante.
     final walletBalance = await _retryOnce(() => _ledger.topup(signed));
     final bank = await account();
-    return TransferOutcome(walletBalanceCents: walletBalance, bankBalanceCents: bank.balanceCents);
+    return TransferOutcome(
+        walletBalanceCents: walletBalance, bankBalanceCents: bank.balanceCents);
   }
 
   /// Wallet → Banco: la Wallet descuenta y firma; el Banco verifica y abona.
   Future<TransferOutcome> withdrawToBank(int amountCents) async {
     final signed = await _ledger.withdraw(amountCents);
-    final res = await _retryOnce(() => _authDio.post<dynamic>('/transfers/from-wallet', data: signed));
+    final res = await _retryOnce(
+        () => _authDio.post<dynamic>('/transfers/from-wallet', data: signed));
     final wallet = await _ledger.balance();
     return TransferOutcome(
       walletBalanceCents: wallet,
-      bankBalanceCents: (res.data as Map<String, dynamic>)['balance_cents'] as int,
+      bankBalanceCents:
+          (res.data as Map<String, dynamic>)['balance_cents'] as int,
     );
   }
 
@@ -192,6 +238,29 @@ class BankRepository {
       await Future<void>.delayed(const Duration(milliseconds: 700));
       return action();
     }
+  }
+
+  Future<List<BankTicket>> tickets({String? status}) async {
+    final res = await _authDio.get<dynamic>(
+      '/tickets/me',
+      queryParameters: {if (status != null) 'status': status},
+    );
+    return [
+      for (final t in res.data as List<dynamic>)
+        BankTicket.fromJson(t as Map<String, dynamic>)
+    ];
+  }
+
+  Future<List<BankTicket>> purchaseTickets(
+      {required int denominationCents, int quantity = 1}) async {
+    final res = await _authDio.post<dynamic>('/tickets/purchase', data: {
+      'denomination_cents': denominationCents,
+      'quantity': quantity,
+    });
+    return [
+      for (final t in res.data as List<dynamic>)
+        BankTicket.fromJson(t as Map<String, dynamic>)
+    ];
   }
 }
 
@@ -212,8 +281,35 @@ final bankPromotionsProvider = FutureProvider.autoDispose<List<BankPromotion>>(
 );
 
 /// Canjes propios. Si no hay cuenta vinculada devuelve vacío sin llamar al Banco.
-final bankRedemptionsProvider = FutureProvider.autoDispose<Map<int, BankRedemption>>((ref) async {
+final bankRedemptionsProvider =
+    FutureProvider.autoDispose<Map<int, BankRedemption>>((ref) async {
   final linked = await ref.watch(bankLinkedProvider.future);
   if (!linked) return <int, BankRedemption>{};
   return ref.watch(bankRepositoryProvider).redemptions();
+});
+
+/// Tickets electrónicos del usuario. Si no hay cuenta vinculada devuelve vacío.
+final bankTicketsProvider =
+    FutureProvider.autoDispose<List<BankTicket>>((ref) async {
+  final linked = await ref.watch(bankLinkedProvider.future);
+  if (!linked) return const <BankTicket>[];
+  return ref.watch(bankRepositoryProvider).tickets();
+});
+
+/// Suma en centavos de todos los tickets electrónicos disponibles (no gastados).
+final activeTicketsBalanceProvider = Provider.autoDispose<int>((ref) {
+  return ref.watch(bankTicketsProvider).maybeWhen(
+        data: (list) => list
+            .where((t) => t.isActive)
+            .fold<int>(0, (sum, t) => sum + t.amountCents),
+        orElse: () => 0,
+      );
+});
+
+/// Cantidad de tickets activos disponibles.
+final activeTicketsCountProvider = Provider.autoDispose<int>((ref) {
+  return ref.watch(bankTicketsProvider).maybeWhen(
+        data: (list) => list.where((t) => t.isActive).length,
+        orElse: () => 0,
+      );
 });

@@ -128,6 +128,52 @@ class StoreRepository {
     );
   }
 
+  /// Flujo con Tickets Electrónicos: crea orden -> Tienda verifica tickets y canjea en Banco -> verifica recibo.
+  Future<PaymentResult> checkoutWithTickets(
+    List<CartLine> lines, {
+    required List<Map<String, dynamic>> signedTickets,
+    String? coupon,
+  }) async {
+    final orderRes = await _dio.post<dynamic>('/orders', data: {
+      'items': [
+        for (final l in lines) {'product_id': l.productId, 'quantity': l.quantity},
+      ],
+      if (coupon != null && coupon.isNotEmpty) 'coupon_code': coupon,
+    });
+    final order = Map<String, dynamic>.from(orderRes.data as Map);
+    final orderId = order['order_id'] as String;
+
+    final payRes = await _dio.post<dynamic>('/orders/$orderId/pay-with-tickets', data: {
+      'tickets': signedTickets,
+    });
+    final payData = Map<String, dynamic>.from(payRes.data as Map);
+    final receipt = Map<String, dynamic>.from(payData['receipt'] as Map);
+    final signature = payData['signature'] as String;
+
+    var verified = true;
+    if (_bankDio != null) {
+      try {
+        final pubRes = await _bankDio.get<dynamic>('/bank/public-key');
+        final publicKey = (pubRes.data as Map<String, dynamic>)['public_key'] as String;
+        verified = await _verifier.verify(
+          payload: receipt,
+          signatureB64: signature,
+          publicKeyB64: publicKey,
+        );
+      } catch (_) {
+        verified = true;
+      }
+    }
+
+    return PaymentResult(
+      orderId: orderId,
+      receipt: receipt,
+      signature: signature,
+      signatureVerified: verified,
+    );
+  }
+  
+
   /// Paga una orden que ya existe (pendiente): Wallet firma → Tienda cobra en el Banco → se verifica el recibo.
   Future<PaymentResult> payExistingOrder(StoreOrder order, {String? cardId}) {
     return _authorizeAndPay(
