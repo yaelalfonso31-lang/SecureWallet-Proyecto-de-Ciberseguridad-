@@ -2,11 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../data/cards_repository.dart';
+import '../../bank/data/bank_auth_repository.dart';
+import '../../bank/data/bank_repository.dart';
+import '../../bank/presentation/bank_link_page.dart';
+import '../../bank/presentation/tickets_page.dart';
 import '../data/auth_repository.dart';
+import '../data/cards_repository.dart';
 import '../data/demo_wallet_store.dart';
 import '../data/wallet_ledger_repository.dart';
 import 'home_page.dart';
+import 'theme/wallet_format.dart';
 import 'theme/wallet_palette.dart';
 import 'widgets/balance_card.dart';
 import 'widgets/credit_card_view.dart';
@@ -21,7 +26,7 @@ class _Action {
   final bool yellow;
 }
 
-/// Pestaña "Inicio": saldo, accesos rápidos, seguridad, tarjetas y últimos movimientos.
+/// Pestaña "Inicio": saldo, saldo en tickets, accesos rápidos, seguridad, tarjetas y últimos movimientos.
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
 
@@ -36,7 +41,31 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     ref.invalidate(cardsProvider);
     ref.invalidate(profileProvider);
     ref.invalidate(walletBalanceProvider);
+    ref.invalidate(bankLinkedProvider);
+    ref.invalidate(bankAccountProvider);
+    ref.invalidate(bankTicketsProvider);
     await Future<void>.delayed(const Duration(milliseconds: 400));
+  }
+
+  Future<void> _openTickets() async {
+    var linked = await ref.read(bankAuthRepositoryProvider).isLinked();
+    if (!linked) {
+      if (!mounted) return;
+      final ok = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(builder: (_) => const BankLinkPage()),
+      );
+      if (ok != true) return;
+      ref.invalidate(bankLinkedProvider);
+      ref.invalidate(bankAccountProvider);
+      ref.invalidate(bankTicketsProvider);
+      linked = true;
+    }
+    if (!mounted || !linked) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const TicketsPage()),
+    );
+    ref.invalidate(bankTicketsProvider);
+    ref.invalidate(bankAccountProvider);
   }
 
   @override
@@ -45,26 +74,63 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final profile = ref.watch(profileProvider);
     final cards = ref.watch(cardsProvider);
     final settings = ref.watch(securitySettingsProvider);
-    final realBalance = ref.watch(walletBalanceProvider).maybeWhen(data: (b) => b, orElse: () => null);
+    final realBalance = ref
+        .watch(walletBalanceProvider)
+        .maybeWhen(data: (b) => b, orElse: () => null);
+    final ticketsBalanceCents = ref.watch(activeTicketsBalanceProvider);
+    final ticketsCount = ref.watch(activeTicketsCountProvider);
     final blocked = ref.watch(blockedCardsProvider);
     final defaultId = ref.watch(defaultCardIdProvider);
 
-    final fullName = profile.maybeWhen(data: (p) => p.fullName, orElse: () => '');
-    final firstName = fullName.isEmpty ? 'bienvenido' : fullName.split(' ').first;
+    final fullName =
+        profile.maybeWhen(data: (p) => p.fullName, orElse: () => '');
+    final firstName =
+        fullName.isEmpty ? 'bienvenido' : fullName.split(' ').first;
 
     final actions = <_Action>[
       _Action(Icons.send_rounded, 'Enviar', () => context.push('/money/send')),
-      _Action(Icons.qr_code_2_rounded, 'Recibir', () => context.push('/receive'), yellow: true),
-      _Action(Icons.add_card_rounded, 'Recargar', () => context.push('/money/topup')),
-      _Action(Icons.account_balance_rounded, 'Retirar', () => context.push('/money/withdraw'), yellow: true),
+      _Action(
+        Icons.qr_code_2_rounded,
+        'Recibir',
+        () => context.push('/receive'),
+        yellow: true,
+      ),
+      _Action(
+        Icons.add_card_rounded,
+        'Recargar',
+        () => context.push('/money/topup'),
+      ),
+      _Action(
+        Icons.account_balance_rounded,
+        'Retirar',
+        () => context.push('/money/withdraw'),
+        yellow: true,
+      ),
       _Action(
         Icons.qr_code_scanner_rounded,
         'Escanear',
-        () => showWalletSnack(context, 'El escáner de QR llegará pronto (demostración)'),
+        () => showWalletSnack(
+          context,
+          'El escáner de QR llegará pronto (demostración)',
+        ),
       ),
-      _Action(Icons.history_rounded, 'Historial', () => context.push('/history'), yellow: true),
-      _Action(Icons.contacts_rounded, 'Contactos', () => context.push('/contacts')),
-      _Action(Icons.shield_rounded, 'Seguridad', () => context.push('/security'), yellow: true),
+      _Action(
+        Icons.history_rounded,
+        'Historial',
+        () => context.push('/history'),
+        yellow: true,
+      ),
+      _Action(
+        Icons.contacts_rounded,
+        'Contactos',
+        () => context.push('/contacts'),
+      ),
+      _Action(
+        Icons.shield_rounded,
+        'Seguridad',
+        () => context.push('/security'),
+        yellow: true,
+      ),
     ];
 
     final recent = wallet.transactions.take(4).toList();
@@ -83,7 +149,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 children: [
                   Row(
                     children: [
-                      InitialsAvatar(fullName.isEmpty ? 'SW' : fullName, radius: 22),
+                      InitialsAvatar(fullName.isEmpty ? 'SW' : fullName,
+                          radius: 22),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -91,13 +158,20 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                           children: [
                             Text(
                               'Hola,',
-                              style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13),
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.8),
+                                fontSize: 13,
+                              ),
                             ),
                             Text(
                               firstName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
                           ],
                         ),
@@ -108,21 +182,65 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                         icon: const Badge(
                           smallSize: 9,
                           backgroundColor: WalletColors.yellow,
-                          child: Icon(Icons.notifications_rounded, color: Colors.white, size: 28),
+                          child: Icon(
+                            Icons.notifications_rounded,
+                            color: Colors.white,
+                            size: 28,
+                          ),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   BalanceCard(
-                    // Saldo real de la Wallet (recargas y retiros con el Banco); si el backend aún no
-                    // tiene /wallet/balance, se muestra el saldo de demostración.
                     balanceCents: realBalance ?? wallet.balanceCents,
                     hidden: _hidden,
                     onToggle: () => setState(() => _hidden = !_hidden),
                     onSend: () => context.push('/money/send'),
                     onTopUp: () => context.push('/money/topup'),
                   ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: SoftCard(
+              onTap: _openTickets,
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  const IconBadge(
+                    Icons.confirmation_number_rounded,
+                    size: 44,
+                    color: WalletColors.navy,
+                    background: WalletColors.yellowSoft,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Saldo en tickets', style: WalletText.muted),
+                        Text(
+                          _hidden
+                              ? '\$ ••••••'
+                              : formatMoney(ticketsBalanceCents),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            color: WalletColors.navy,
+                          ),
+                        ),
+                        Text(
+                          '$ticketsCount ${ticketsCount == 1 ? 'ticket disponible' : 'tickets disponibles'}',
+                          style: WalletText.muted,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded,
+                      color: WalletColors.muted),
                 ],
               ),
             ),
@@ -136,7 +254,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             childAspectRatio: 0.82,
             children: [
               for (final a in actions)
-                QuickAction(icon: a.icon, label: a.label, yellow: a.yellow, onTap: a.onTap),
+                QuickAction(
+                  icon: a.icon,
+                  label: a.label,
+                  yellow: a.yellow,
+                  onTap: a.onTap,
+                ),
             ],
           ),
           Padding(
@@ -158,10 +281,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                             value: settings.score / 100,
                             strokeWidth: 6,
                             backgroundColor: WalletColors.line,
-                            color: settings.score >= 70 ? WalletColors.success : WalletColors.yellowDark,
+                            color: settings.score >= 70
+                                ? WalletColors.success
+                                : WalletColors.yellowDark,
                           ),
                         ),
-                        Text('${settings.score}%', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+                        Text(
+                          '${settings.score}%',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 13,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -170,7 +301,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Seguridad de tu cuenta', style: WalletText.h3),
+                        const Text('Seguridad de tu cuenta',
+                            style: WalletText.h3),
                         const SizedBox(height: 2),
                         Text(
                           settings.score >= 70
@@ -181,7 +313,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       ],
                     ),
                   ),
-                  const Icon(Icons.chevron_right_rounded, color: WalletColors.muted),
+                  const Icon(Icons.chevron_right_rounded,
+                      color: WalletColors.muted),
                 ],
               ),
             ),
@@ -192,12 +325,16 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             onAction: () => ref.read(homeTabProvider.notifier).select(1),
           ),
           cards.when(
-            loading: () => const SizedBox(height: 150, child: Center(child: CircularProgressIndicator())),
+            loading: () => const SizedBox(
+              height: 150,
+              child: Center(child: CircularProgressIndicator()),
+            ),
             error: (e, _) => const Padding(
               padding: EdgeInsets.symmetric(horizontal: 20),
               child: InfoBanner(
                 kind: BannerKind.danger,
-                text: 'No pudimos cargar tus tarjetas. Desliza hacia abajo para reintentar.',
+                text:
+                    'No pudimos cargar tus tarjetas. Desliza hacia abajo para reintentar.',
               ),
             ),
             data: (list) {
@@ -208,12 +345,20 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     onTap: () => context.push('/cards/add'),
                     child: const Row(
                       children: [
-                        IconBadge(Icons.add_card_rounded, color: WalletColors.navy, background: WalletColors.yellowSoft),
+                        IconBadge(
+                          Icons.add_card_rounded,
+                          color: WalletColors.navy,
+                          background: WalletColors.yellowSoft,
+                        ),
                         SizedBox(width: 14),
                         Expanded(
-                          child: Text('Agrega tu primera tarjeta para recargar y pagar', style: WalletText.body),
+                          child: Text(
+                            'Agrega tu primera tarjeta para recargar y pagar',
+                            style: WalletText.body,
+                          ),
                         ),
-                        Icon(Icons.chevron_right_rounded, color: WalletColors.muted),
+                        Icon(Icons.chevron_right_rounded,
+                            color: WalletColors.muted),
                       ],
                     ),
                   ),
@@ -225,7 +370,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   itemCount: list.length + 1,
-                  separatorBuilder: (context, index) => const SizedBox(width: 12),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 12),
                   itemBuilder: (context, i) {
                     if (i == list.length) {
                       return SizedBox(
@@ -235,7 +381,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                           child: const Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              IconBadge(Icons.add_rounded, color: WalletColors.navy, background: WalletColors.yellowSoft),
+                              IconBadge(
+                                Icons.add_rounded,
+                                color: WalletColors.navy,
+                                background: WalletColors.yellowSoft,
+                              ),
                               SizedBox(height: 8),
                               Text('Agregar', style: WalletText.h3),
                             ],
@@ -274,17 +424,26 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.local_offer_rounded, color: WalletColors.navy, size: 34),
+                  Icon(Icons.local_offer_rounded,
+                      color: WalletColors.navy, size: 34),
                   SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Promociones para ti', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: WalletColors.navy)),
+                        Text(
+                          'Promociones para ti',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 16,
+                            color: WalletColors.navy,
+                          ),
+                        ),
                         SizedBox(height: 2),
                         Text(
                           'Revisa bonos y descuentos en la pestaña Banco',
-                          style: TextStyle(fontSize: 13, color: WalletColors.navy),
+                          style:
+                              TextStyle(fontSize: 13, color: WalletColors.navy),
                         ),
                       ],
                     ),
@@ -308,7 +467,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     if (i > 0) const Divider(height: 1, indent: 72),
                     TransactionTile(
                       tx: recent[i],
-                      onTap: () => context.push('/transaction', extra: recent[i]),
+                      onTap: () =>
+                          context.push('/transaction', extra: recent[i]),
                     ),
                   ],
                 ],

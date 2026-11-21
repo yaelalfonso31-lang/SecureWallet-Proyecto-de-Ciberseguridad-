@@ -3,9 +3,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/network/api_client.dart';
 import '../../../core/security/biometric_service.dart';
+import '../../bank/data/bank_auth_repository.dart';
+import '../../bank/data/bank_repository.dart';
+import '../../bank/presentation/bank_link_page.dart';
 import '../data/cards_repository.dart';
 import '../data/demo_wallet_store.dart';
+import '../data/wallet_ledger_repository.dart';
 import '../data/wallet_models.dart';
 import 'theme/wallet_format.dart';
 import 'theme/wallet_palette.dart';
@@ -24,8 +29,8 @@ MoneyAction moneyActionFromPath(String? value) {
   }
 }
 
-/// Pantalla única para Enviar, Recargar y Retirar (cambia el selector según la acción).
-/// DEMOSTRACIÓN: mueve el saldo local. TODO: conectar con el backend (firma de la orden de pago).
+/// Pantalla única para Enviar, Recargar y Retirar.
+/// Recargar y Retirar operan contra el backend real (Banco <-> Wallet con comprobantes Ed25519).
 class MoneyActionPage extends ConsumerStatefulWidget {
   const MoneyActionPage({super.key, required this.action, this.initialContact});
 
@@ -41,7 +46,7 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
   final _note = TextEditingController();
   WalletContact? _contact;
   WalletCard? _card;
-  BankAccountInfo? _account;
+  bool _useBankAccount = true;
   String? _error;
   bool _busy = false;
 
@@ -82,78 +87,171 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
     }
   }
 
-  String? _validate() {
+  Future<void> _openBankLink() async {
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(builder: (_) => const BankLinkPage()),
+    );
+    if (ok == true) {
+      ref.invalidate(bankLinkedProvider);
+      ref.invalidate(bankAccountProvider);
+      ref.invalidate(bankTicketsProvider);
+      if (mounted) setState(() => _error = null);
+    }
+  }
+
+  String? _validate({
+    required bool bankLinked,
+    required BankAccount? bankAccount,
+    required int walletBalance,
+  }) {
     final settings = ref.read(securitySettingsProvider);
-    final balance = ref.read(demoWalletProvider).balanceCents;
-    if (settings.emergencyLock) return 'Tu wallet está bloqueada. Desactiva el bloqueo de emergencia en Seguridad.';
+    if (settings.emergencyLock) {
+      return 'Tu wallet está bloqueada. Desactiva el bloqueo de emergencia en Seguridad.';
+    }
     if (_cents <= 0) return 'Escribe un monto mayor a cero';
-    if (_cents > settings.perTxLimitCents) return 'Supera tu límite por operación (${formatMoney(settings.perTxLimitCents)})';
-    if (widget.action != MoneyAction.topUp && _cents > balance) return 'Saldo insuficiente';
-    if (widget.action == MoneyAction.send && _contact == null) return 'Elige a quién quieres enviar';
-    if (widget.action == MoneyAction.topUp && _card == null) return 'Elige la tarjeta de origen';
-    if (widget.action == MoneyAction.withdraw && _account == null) return 'Elige la cuenta de destino';
+    if (_cents > settings.perTxLimitCents) {
+      return 'Supera tu límite por operación (${formatMoney(settings.perTxLimitCents)})';
+    }
+
+    if (widget.action == MoneyAction.send) {
+      if (_cents > walletBalance) return 'Saldo insuficiente en tu Wallet';
+      if (_contact == null) return 'Elige a quién quieres enviar';
+      return null;
+    }
+
+    if (!bankLinked) {
+      return 'Primero vincula o abre tu cuenta del Banco para mover dinero real';
+    }
+
+    if (widget.action == MoneyAction.topUp) {
+      if (bankAccount != null && _cents > bankAccount.balanceCents) {
+        return 'Tu cuenta del Banco solo tiene ${formatMoney(bankAccount.balanceCents)}';
+      }
+      if (_card == null && !_useBankAccount) {
+        return 'Elige tu tarjeta o cuenta bancaria de origen';
+      }
+    }
+
+    if (widget.action == MoneyAction.withdraw) {
+      if (_cents > walletBalance) {
+        return 'Tu Wallet solo tiene ${formatMoney(walletBalance)}';
+      }
+    }
+
     return null;
   }
 
-  String get _targetLabel {
+  String _targetLabel(BankAccount? bankAccount) {
+    final masked = bankAccount?.numberMasked ?? 'Cuenta Azul';
     switch (widget.action) {
       case MoneyAction.send:
         return _contact?.name ?? '';
       case MoneyAction.topUp:
-        return _card == null ? '' : '${_card!.brandLabel} •••• ${_card!.last4}';
+        if (_card != null) {
+          return '${_card!.brandLabel} •••• ${_card!.last4} (Banco $masked)';
+        }
+        return 'Cuenta Azul $masked';
       case MoneyAction.withdraw:
-        return _account == null ? '' : '${_account!.bank} •••• ${_account!.last4}';
+        return 'Cuenta Azul $masked';
     }
   }
 
-  Future<void> _continue() async {
-    final error = _validate();
+  Future<void> _continue({
+    required bool bankLinked,
+    required BankAccount? bankAccount,
+    required int walletBalance,
+  }) async {
+    final error = _validate(
+      bankLinked: bankLinked,
+      bankAccount: bankAccount,
+      walletBalance: walletBalance,
+    );
     if (error != null) {
       setState(() => _error = error);
       return;
     }
     setState(() => _error = null);
 
+    final target = _targetLabel(bankAccount);
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
       builder: (ctx) => _ConfirmSheet(
         title: _title,
         icon: _icon,
         amountCents: _cents,
-        target: _targetLabel,
+        target: target,
         note: _note.text.trim(),
       ),
     );
     if (confirmed != true || !mounted) return;
 
     setState(() => _busy = true);
-    final bio = BiometricService();
-    if (await bio.isAvailable()) {
-      final ok = await bio.authenticate('Confirma la operación con tu huella o PIN');
-      if (!ok) {
-        if (mounted) {
-          setState(() {
-            _busy = false;
-            _error = 'No se pudo verificar tu identidad';
-          });
+    try {
+      final bio = BiometricService();
+      if (await bio.isAvailable()) {
+        final ok =
+            await bio.authenticate('Confirma la operación con tu huella o PIN');
+        if (!ok) {
+          if (mounted) {
+            setState(() {
+              _busy = false;
+              _error = 'No se pudo verificar tu identidad';
+            });
+          }
+          return;
         }
-        return;
+      }
+      if (!mounted) return;
+
+      final notifier = ref.read(demoWalletProvider.notifier);
+      final WalletTransaction tx;
+
+      if (widget.action == MoneyAction.topUp) {
+        await ref.read(bankRepositoryProvider).rechargeWallet(_cents);
+        ref.invalidate(walletBalanceProvider);
+        ref.invalidate(bankAccountProvider);
+        tx = notifier.topUp(target, _cents);
+      } else if (widget.action == MoneyAction.withdraw) {
+        await ref.read(bankRepositoryProvider).withdrawToBank(_cents);
+        ref.invalidate(walletBalanceProvider);
+        ref.invalidate(bankAccountProvider);
+        tx = notifier.withdraw(target, _cents);
+      } else {
+        tx = notifier.send(_contact!, _cents, note: _note.text.trim());
+      }
+
+      if (!mounted) return;
+      context.pushReplacement('/success', extra: tx);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = errorMessage(e);
+        });
       }
     }
-    if (!mounted) return;
-
-    final notifier = ref.read(demoWalletProvider.notifier);
-    final tx = switch (widget.action) {
-      MoneyAction.send => notifier.send(_contact!, _cents, note: _note.text.trim()),
-      MoneyAction.topUp => notifier.topUp(_targetLabel, _cents),
-      MoneyAction.withdraw => notifier.withdraw(_targetLabel, _cents),
-    };
-    context.pushReplacement('/success', extra: tx);
   }
 
-  Widget _selector() {
+  Widget _linkBankCard(String message) {
+    return Column(
+      children: [
+        InfoBanner(kind: BannerKind.warning, text: message),
+        const SizedBox(height: 12),
+        SecondaryButton(
+          label: 'Vincular o abrir cuenta del Banco',
+          icon: Icons.link_rounded,
+          onPressed: _busy ? null : _openBankLink,
+        ),
+      ],
+    );
+  }
+
+  Widget _selector(
+      {required bool bankLinked, required BankAccount? bankAccount}) {
     switch (widget.action) {
       case MoneyAction.send:
         final contacts = ref.watch(demoWalletProvider).contacts;
@@ -169,7 +267,12 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
                   onTap: () => context.push('/contacts'),
                   child: const Column(
                     children: [
-                      IconBadge(Icons.person_add_alt_1_rounded, size: 56, color: WalletColors.navy, background: WalletColors.yellowSoft),
+                      IconBadge(
+                        Icons.person_add_alt_1_rounded,
+                        size: 56,
+                        color: WalletColors.navy,
+                        background: WalletColors.yellowSoft,
+                      ),
                       SizedBox(height: 6),
                       Text('Nuevo', style: WalletText.muted),
                     ],
@@ -191,12 +294,18 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
                         padding: const EdgeInsets.all(3),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: selected ? WalletColors.yellowDark : Colors.transparent, width: 3),
+                          border: Border.all(
+                            color: selected
+                                ? WalletColors.yellowDark
+                                : Colors.transparent,
+                            width: 3,
+                          ),
                         ),
                         child: InitialsAvatar(
                           contact.name,
                           radius: 24,
-                          background: selected ? WalletColors.yellow : WalletColors.ice,
+                          background:
+                              selected ? WalletColors.yellow : WalletColors.ice,
                           foreground: WalletColors.navy,
                         ),
                       ),
@@ -205,7 +314,11 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
                         contact.name.split(' ').first,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, fontWeight: selected ? FontWeight.w800 : FontWeight.w600),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight:
+                              selected ? FontWeight.w800 : FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
@@ -214,53 +327,67 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
             },
           ),
         );
+
       case MoneyAction.topUp:
+        if (!bankLinked) {
+          return _linkBankCard(
+            'Vincula tu cuenta del Banco para que tus recargas se reflejen en el saldo real de tu Wallet.',
+          );
+        }
         final cards = ref.watch(cardsProvider);
-        return cards.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => const InfoBanner(kind: BannerKind.danger, text: 'No pudimos cargar tus tarjetas.'),
-          data: (list) {
-            if (list.isEmpty) {
-              return Column(
-                children: [
-                  const InfoBanner(kind: BannerKind.warning, text: 'Necesitas una tarjeta para recargar.'),
-                  const SizedBox(height: 12),
-                  SecondaryButton(label: 'Agregar tarjeta', icon: Icons.add_card_rounded, onPressed: () => context.push('/cards/add')),
-                ],
-              );
-            }
-            return Column(
-              children: [
-                for (final c in list)
-                  _SelectTile(
-                    icon: Icons.credit_card_rounded,
-                    title: '${c.brandLabel} •••• ${c.last4}',
-                    subtitle: 'Vence ${c.expiry}',
-                    selected: _card?.id == c.id,
-                    onTap: () => setState(() {
-                      _card = c;
-                      _error = null;
-                    }),
-                  ),
-              ],
-            );
-          },
-        );
-      case MoneyAction.withdraw:
         return Column(
           children: [
-            for (final a in demoBankAccounts)
-              _SelectTile(
-                icon: Icons.account_balance_rounded,
-                title: a.bank,
-                subtitle: 'Cuenta •••• ${a.last4}',
-                selected: _account?.last4 == a.last4,
-                onTap: () => setState(() {
-                  _account = a;
-                  _error = null;
-                }),
+            _SelectTile(
+              icon: Icons.account_balance_rounded,
+              title: 'Cuenta Azul ${bankAccount?.numberMasked ?? ''}',
+              subtitle: bankAccount == null
+                  ? 'Cargando saldo del Banco…'
+                  : 'Disponible en Banco: ${formatMoney(bankAccount.balanceCents)}',
+              selected: _useBankAccount && _card == null,
+              onTap: () => setState(() {
+                _useBankAccount = true;
+                _card = null;
+                _error = null;
+              }),
+            ),
+            cards.when(
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+              data: (list) => Column(
+                children: [
+                  for (final c in list)
+                    _SelectTile(
+                      icon: Icons.credit_card_rounded,
+                      title: '${c.brandLabel} •••• ${c.last4}',
+                      subtitle:
+                          'Vence ${c.expiry} · Cargo a tu cuenta bancaria',
+                      selected: _card?.id == c.id,
+                      onTap: () => setState(() {
+                        _card = c;
+                        _useBankAccount = false;
+                        _error = null;
+                      }),
+                    ),
+                ],
               ),
+            ),
           ],
+        );
+
+      case MoneyAction.withdraw:
+        if (!bankLinked) {
+          return _linkBankCard(
+            'Vincula tu cuenta del Banco para recibir tus retiros con comprobante firmado.',
+          );
+        }
+        return _SelectTile(
+          icon: Icons.account_balance_rounded,
+          title: 'Cuenta Azul ${bankAccount?.numberMasked ?? ''}',
+          subtitle: bankAccount == null
+              ? 'Cargando cuenta vinculada…'
+              : 'Saldo actual en Banco: ${formatMoney(bankAccount.balanceCents)}',
+          selected: true,
+          onTap: () => setState(() => _error = null),
         );
     }
   }
@@ -270,15 +397,29 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
       case MoneyAction.send:
         return 'Enviar a';
       case MoneyAction.topUp:
-        return 'Desde qué tarjeta';
+        return 'Origen de fondos (sincronizado con Banco)';
       case MoneyAction.withdraw:
-        return 'A qué cuenta';
+        return 'Cuenta bancaria vinculada';
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final balance = ref.watch(demoWalletProvider).balanceCents;
+    final demoBalance = ref.watch(demoWalletProvider).balanceCents;
+    final realBalance = ref
+        .watch(walletBalanceProvider)
+        .maybeWhen(data: (b) => b, orElse: () => null);
+    final walletBalance = realBalance ?? demoBalance;
+
+    final bankLinked = ref
+        .watch(bankLinkedProvider)
+        .maybeWhen(data: (v) => v, orElse: () => false);
+    final bankAccount = bankLinked
+        ? ref
+            .watch(bankAccountProvider)
+            .maybeWhen(data: (a) => a, orElse: () => null)
+        : null;
+
     final quick = [100, 200, 500, 1000];
     return Scaffold(
       backgroundColor: WalletColors.background,
@@ -290,22 +431,43 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
             child: Column(
               children: [
-                IconBadge(_icon, size: 52, color: WalletColors.navy, background: WalletColors.yellowSoft),
+                IconBadge(
+                  _icon,
+                  size: 52,
+                  color: WalletColors.navy,
+                  background: WalletColors.yellowSoft,
+                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _amount,
                   textAlign: TextAlign.center,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d{0,7}(\.\d{0,2})?'))],
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                        RegExp(r'^\d{0,7}(\.\d{0,2})?')),
+                  ],
                   onChanged: (_) => setState(() => _error = null),
-                  style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w900, color: WalletColors.navy),
+                  style: const TextStyle(
+                    fontSize: 40,
+                    fontWeight: FontWeight.w900,
+                    color: WalletColors.navy,
+                  ),
                   decoration: const InputDecoration(
                     border: InputBorder.none,
                     hintText: '0.00',
                     prefixText: '\$ ',
                   ),
                 ),
-                Text('Saldo disponible: ${formatMoney(balance)}', style: WalletText.muted),
+                Text(
+                  'Saldo en Wallet: ${formatMoney(walletBalance)}',
+                  style: WalletText.muted,
+                ),
+                if (bankAccount != null && widget.action != MoneyAction.send)
+                  Text(
+                    'Saldo en Banco: ${formatMoney(bankAccount.balanceCents)}',
+                    style: WalletText.muted,
+                  ),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
@@ -314,7 +476,9 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
                   children: [
                     for (final q in quick)
                       ActionChip(
-                        label: Text('\$$q', style: const TextStyle(fontWeight: FontWeight.w800)),
+                        label: Text('\$$q',
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w800)),
                         backgroundColor: WalletColors.yellowSoft,
                         side: BorderSide.none,
                         onPressed: () => setState(() {
@@ -327,8 +491,9 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
               ],
             ),
           ),
-          SectionTitle(_selectorTitle, padding: const EdgeInsets.fromLTRB(4, 22, 4, 10)),
-          _selector(),
+          SectionTitle(_selectorTitle,
+              padding: const EdgeInsets.fromLTRB(4, 22, 4, 10)),
+          _selector(bankLinked: bankLinked, bankAccount: bankAccount),
           if (widget.action == MoneyAction.send) ...[
             const SizedBox(height: 16),
             WalletTextField(
@@ -347,13 +512,18 @@ class _MoneyActionPageState extends ConsumerState<MoneyActionPage> {
             label: 'Continuar',
             icon: Icons.arrow_forward_rounded,
             loading: _busy,
-            onPressed: _continue,
+            onPressed: () => _continue(
+              bankLinked: bankLinked,
+              bankAccount: bankAccount,
+              walletBalance: walletBalance,
+            ),
           ),
           const SizedBox(height: 12),
           const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.fingerprint_rounded, size: 16, color: WalletColors.muted),
+              Icon(Icons.fingerprint_rounded,
+                  size: 16, color: WalletColors.muted),
               SizedBox(width: 6),
               Text('Confirmarás con tu huella o PIN', style: WalletText.muted),
             ],
@@ -386,7 +556,10 @@ class _SelectTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: selected ? WalletColors.yellowDark : WalletColors.line, width: selected ? 2 : 1),
+        border: Border.all(
+          color: selected ? WalletColors.yellowDark : WalletColors.line,
+          width: selected ? 2 : 1,
+        ),
       ),
       child: ListTile(
         onTap: onTap,
@@ -394,7 +567,9 @@ class _SelectTile extends StatelessWidget {
         title: Text(title, style: WalletText.h3),
         subtitle: Text(subtitle, style: WalletText.muted),
         trailing: Icon(
-          selected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+          selected
+              ? Icons.check_circle_rounded
+              : Icons.radio_button_unchecked_rounded,
           color: selected ? WalletColors.yellowDark : WalletColors.muted,
         ),
       ),
@@ -428,28 +603,46 @@ class _ConfirmSheet extends StatelessWidget {
             Container(
               width: 44,
               height: 5,
-              decoration: BoxDecoration(color: WalletColors.line, borderRadius: BorderRadius.circular(4)),
+              decoration: BoxDecoration(
+                color: WalletColors.line,
+                borderRadius: BorderRadius.circular(4),
+              ),
             ),
             const SizedBox(height: 20),
-            IconBadge(icon, size: 56, color: WalletColors.navy, background: WalletColors.yellowSoft),
+            IconBadge(
+              icon,
+              size: 56,
+              color: WalletColors.navy,
+              background: WalletColors.yellowSoft,
+            ),
             const SizedBox(height: 12),
             Text('Confirmar: $title', style: WalletText.h2),
             const SizedBox(height: 4),
             Text(
               formatMoney(amountCents),
-              style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w900, color: WalletColors.blue),
+              style: const TextStyle(
+                fontSize: 34,
+                fontWeight: FontWeight.w900,
+                color: WalletColors.blue,
+              ),
             ),
             const SizedBox(height: 12),
-            DetailRow('Destino', target, icon: Icons.flag_rounded),
-            if (note.isNotEmpty) DetailRow('Mensaje', note, icon: Icons.chat_bubble_outline_rounded),
-            const DetailRow('Comisión', 'Sin costo', icon: Icons.savings_rounded),
+            DetailRow('Cuenta / Tarjeta', target, icon: Icons.flag_rounded),
+            if (note.isNotEmpty)
+              DetailRow('Mensaje', note,
+                  icon: Icons.chat_bubble_outline_rounded),
+            const DetailRow('Comisión', 'Sin costo',
+                icon: Icons.savings_rounded),
             const SizedBox(height: 16),
             PrimaryButton(
               label: 'Confirmar',
               icon: Icons.fingerprint_rounded,
               onPressed: () => Navigator.of(context).pop(true),
             ),
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancelar')),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
           ],
         ),
       ),
