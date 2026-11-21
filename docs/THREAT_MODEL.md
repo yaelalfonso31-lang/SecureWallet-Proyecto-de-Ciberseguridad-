@@ -1,17 +1,25 @@
-# Modelo de amenazas (STRIDE) — punto de partida
+# Modelo de amenazas (STRIDE)
 
-Completar y mantener durante el proyecto. Cada fila debe terminar enlazada a una prueba o a una demo.
+Modelo de amenazas del sistema SecureWallet con foco en los controles y servicios del Banco simulado (`bank_service`), la interacción con la Wallet y el canal seguro con la Tienda.
 
-| STRIDE | Amenaza | Activo | Control actual | Pendiente / Demo |
+Todas las amenazas cuentan con pruebas automáticas en `backend/tests/` o comandos reproducibles de demostración.
+
+| STRIDE | Amenaza | Activo | Control implementado | Prueba o Demo |
 |---|---|---|---|---|
-| **S**poofing | Robo de credenciales / fuerza bruta | Cuenta de usuario | Argon2id, bloqueo tras 5 intentos | 2FA TOTP, rate limiting por IP |
-| **S**poofing | Falsificar una orden de pago | Pagos | Firma Ed25519 de la Wallet | Demo: orden con firma ajena → 400 |
-| **T**ampering | Alterar el monto de una orden | Pagos | Firma sobre JSON canónico | Demo: cambiar `amount_cents` → 400 |
-| **T**ampering | Alterar la bitácora | Auditoría | Hash encadenado | Demo: editar un registro → `verify_chain` falla |
-| **R**epudiation | "Yo no hice ese pago" | Pagos | Orden firmada + recibo firmado + bitácora | Exportar comprobante verificable |
-| **I**nfo disclosure | Fuga de la BD con tarjetas | PAN | AES-256-GCM, tokenización, sin CVV | Rotación de claves, Vault |
-| **I**nfo disclosure | Intercepción en la red (MITM) | Tráfico | (pendiente) TLS 1.3 | Certificate pinning + demo con mitmproxy |
-| **D**enial of service | Inundar login/pagos | Disponibilidad | — | Rate limiting, límites de tamaño |
-| **E**levation | Acceder a tarjetas de otro usuario | Datos | Validación de dueño en cada consulta | Pruebas de autorización (IDOR) |
-| **E**levation | Tienda llamando al Banco sin permiso | Banco | `X-API-Key` | mTLS |
-| Replay | Reenviar una orden capturada | Pagos | nonce + timestamp + UNIQUE | Demo: reenvío → 409 |
+| **S**poofing | Fuerza bruta contra contraseñas del Banco | Cuentas de clientes | Hash Argon2id y bloqueo temporal por 15 minutos tras 5 intentos fallidos (`failed_attempts` y `locked_until`) | `tests/test_bank_oauth.py::test_lockout_after_failed_attempts` |
+| **S**poofing | Falsificar una orden de pago hacia el Banco | Pagos | Firma digital Ed25519 de la Wallet sobre el JSON canónico de la orden | `tests/test_bank.py::test_signature_from_other_key_is_rejected` |
+| **S**poofing | Suplantación de la Tienda ante el Banco (API Key filtrada) | API de pagos del Banco (`POST /transactions/process`) | TLS Mutuo (mTLS) con CA interna: el Banco exige certificado de cliente (`CN=store`) además de `X-API-Key` | `tests/test_bank_mtls.py::test_certificates_generation_and_extensions`, `test_bank_client_uses_mtls_on_https`<br>Demo: `curl https://localhost:8002/bank/public-key --cacert certs/ca.pem` → TLS Handshake failure |
+| **S**poofing | Robo o intercepción del código de autorización OAuth2 | Sesión del Banco / Token | Flujo OAuth2 con PKCE S256 (`code_challenge`), código de un solo uso con vigencia de 60 s guardado solo como hash SHA-256; se invalida inmediatamente si el `code_verifier` no coincide | `tests/test_bank_oauth.py::test_wrong_verifier_is_rejected_and_burns_the_code`, `test_reused_code_is_rejected`, `test_pkce_s256_matches_rfc7636_vector`<br>`mobile/test/security/pkce_test.dart` |
+| **S**poofing | Aserción de vinculación Wallet falsa o para otro servicio | Identidad bancaria | La Wallet firma la aserción con Ed25519; el Banco exige `audience == "bank"`, frescura ≤ 120 s y firma válida | `tests/test_bank_oauth.py::test_tampered_assertion_is_rejected`, `test_assertion_for_other_audience_is_rejected` |
+| **T**ampering | Alterar el monto o datos de una orden de pago | Pagos | Verificación de firma Ed25519 sobre orden serializada en formato canónico RFC 8785 | `tests/test_bank.py::test_tampered_order_is_rejected` |
+| **T**ampering | Alterar el comprobante de retiro desde la Wallet | Fondos / Saldo | Verificación de firma Ed25519 de la Wallet sobre el voucher antes de acreditar saldo en el Banco | `tests/test_bank_transfers.py::test_from_wallet_tampered_voucher_is_rejected` |
+| **T**ampering | Alterar la bitácora de auditoría | Bitácora y movimientos | Registros de movimientos inmutables; en Wallet: hash encadenado (HMAC) | `tests/test_wallet_ledger.py::test_tampered_ledger_fails_verification` |
+| **R**epudiation | "Yo no autoricé ese cobro / esa recarga" | Pagos y Transferencias | Recibos y vouchers firmados electrónicamente con llave Ed25519 del Banco y de la Wallet | `tests/test_bank.py::test_process_ok_returns_valid_signed_receipt`<br>`tests/test_bank_transfers.py::test_to_wallet_topup_ok` |
+| **I**nfo disclosure | Fuga de datos de tarjetas en reposo | PAN / Tarjetas | Cifrado simétrico autenticado AES-256-GCM con AAD ligado al usuario; nunca se almacena CVV | Pruebas de Wallet (`test_wallet.py`) |
+| **I**nfo disclosure | Intercepción de comunicaciones Tienda ↔ Banco en tránsito | Comunicaciones / Pagos | mTLS (TLS 1.3/1.2) con cifrado en tránsito y autenticación mutua de certificados de servidor y cliente | `tests/test_bank_mtls.py` |
+| **D**enial of service | Transferencias excesivas o agotamiento de saldo | Liquidez de cuenta | Límite diario acumulativo de transferencias Banco → Wallet (`bank_transfer_daily_limit_cents`) | `tests/test_bank_transfers.py::test_to_wallet_daily_limit` |
+| **E**levation | Acceso no autorizado a cuentas ajenas (IDOR) | Datos bancarios | Todas las consultas (`/accounts/me`, `/accounts/me/movements`) se resuelven exclusivamente mediante el `customer_id` del token; no existen rutas con identificadores de cuenta arbitrarios | `tests/test_bank_accounts.py::test_customer_cannot_see_other_customers_data` |
+| **E**levation | Cliente común intentando crear/modificar promociones | Promociones | Dependencia `require_admin` que comprueba el rol `admin` directamente en la base de datos (no en el token) | `tests/test_bank_onboarding.py::test_admin_endpoints_reject_non_admin` |
+| Replay | Reenvío de una orden de pago capturada | Fondos | Ventana de frescura de 120 s, `nonce` único y restricción `UNIQUE` en tabla `processed_orders` | `tests/test_bank.py::test_replay_is_rejected` |
+| Replay | Doble aplicación de canje de promoción en compras | Promociones y saldos | Restricción `UniqueConstraint(promotion_id, account_id)` en `promotion_redemptions` y verificación transaccional al pagar | `tests/test_bank_promotions.py::test_redeem_duplicate_returns_409`<br>`tests/test_bank.py::test_redemption_is_not_applied_twice` |
+| Replay | Reenvío de comprobantes de recarga o retiro | Transferencias | Idempotencia por `idempotency_key` y unicidad de `nonce` / `transfer_id` en tabla `transfers` | `tests/test_bank_transfers.py::test_to_wallet_is_idempotent`<br>`tests/test_bank_transfers.py::test_from_wallet_replay_is_rejected` |

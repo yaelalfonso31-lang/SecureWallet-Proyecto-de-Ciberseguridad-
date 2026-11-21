@@ -101,8 +101,15 @@ def test_bank_client_http_backward_compatibility():
             assert "verify" not in kwargs
 
 
-def test_resolve_cert_path():
-    """Verifica que _resolve_cert_path resuelva rutas existentes."""
-    resolved = _resolve_cert_path("certs/ca.pem")
+def test_resolve_cert_path(tmp_path: Path):
+    """Verifica que _resolve_cert_path resuelva rutas existentes y maneje fallback."""
+    # 1. Probar con un archivo temporal real
+    dummy_cert = tmp_path / "dummy_ca.pem"
+    dummy_cert.write_text("test")
+    resolved = _resolve_cert_path(str(dummy_cert))
     assert Path(resolved).exists()
-    assert resolved.endswith("ca.pem")
+    assert resolved.endswith("dummy_ca.pem")
+
+    # 2. Si el archivo no existe, devuelve el string original sin romper
+    non_existent = "non_existent_certs/ca.pem"
+    assert _resolve_cert_path(non_existent) == non_existent

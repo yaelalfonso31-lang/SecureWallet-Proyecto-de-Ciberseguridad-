@@ -33,9 +33,9 @@ la Wallet, y se envían como `Authorization: Bearer <token>`.
 | POST | `/promotions/{id}/redeem` | JWT Banco `promotions:redeem` | Canje de un solo uso. 400 vencida, 404 inactiva/inexistente, 409 ya canjeada |
 | POST | `/transfers/to-wallet` | JWT Banco `transfers:write` | Recarga a la Wallet → `{voucher, signature}` firmado por el Banco. Idempotente por `idempotency_key`. 402 fondos, 429 límite diario |
 | POST | `/transfers/from-wallet` | JWT Banco `transfers:write` | Retiro desde la Wallet: verifica el comprobante firmado por la Wallet (firma, frescura, nonce y dueño) y abona. 400 firma/expirado, 403 otro dueño, 409 reenvío |
-| GET | `/admin/promotions` | JWT Banco admin | _(pendiente, B6)_ Lista promociones incluidas las inactivas. 403 sin rol admin |
-| POST | `/admin/promotions` | JWT Banco admin | _(pendiente, B6)_ Crea promoción. 422 validación de rangos |
-| PATCH | `/admin/promotions/{id}` | JWT Banco admin | _(pendiente, B6)_ Edita o desactiva promoción |
+| GET | `/admin/promotions` | JWT Banco admin | Lista promociones incluidas las inactivas. 403 sin rol admin |
+| POST | `/admin/promotions` | JWT Banco admin | Crea promoción. 422 validación de rangos |
+| PATCH | `/admin/promotions/{id}` | JWT Banco admin | Edita o desactiva promoción. 404 si no existe |
 
 ### Vinculación Wallet ↔ Banco
 
