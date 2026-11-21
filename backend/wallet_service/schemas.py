@@ -60,3 +60,17 @@ class PaymentRequest(BaseModel):
     amount_cents: int = Field(gt=0, le=100_000_000)
     currency: str = Field(default="MXN", pattern=r"^[A-Z]{3}$")
     card_id: str | None = None
+
+
+class BankLinkAssertionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    wallet_user_id: str = Field(min_length=1, max_length=64)
+    nonce: str = Field(min_length=16, max_length=64)
+    timestamp: int
+    audience: str = Field(default="bank", max_length=20)
+
+
+class BankLinkAssertionOut(BaseModel):
+    assertion: BankLinkAssertionPayload
+    signature: str

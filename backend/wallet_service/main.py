@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from shared.http import harden_app
 from wallet_service.database import Base, engine
-from wallet_service.routers import auth, cards, payments
+from wallet_service.routers import auth, bank_link, cards, payments, wallet 
 
 
 @asynccontextmanager
@@ -17,9 +17,10 @@ app = FastAPI(title="SecureWallet - Wallet Service", version="0.1.0", lifespan=l
 harden_app(app)
 
 app.include_router(auth.router)
+app.include_router(bank_link.router)
 app.include_router(cards.router)
 app.include_router(payments.router)
-
+app.include_router(wallet.router)
 
 @app.get("/health", tags=["health"])
 def health():

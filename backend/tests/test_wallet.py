@@ -63,6 +63,18 @@ def test_payment_authorization_is_signed(wallet_client):
     assert verify(WALLET_PUB, data["order"], data["signature"])
 
 
+def test_bank_link_assertion_is_signed(wallet_client):
+    assert wallet_client.post("/bank-link/assertion").status_code == 401
+    _, headers = register_and_login(wallet_client)
+    me = wallet_client.get("/auth/me", headers=headers).json()
+    r = wallet_client.post("/bank-link/assertion", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["assertion"]["wallet_user_id"] == me["id"]
+    assert data["assertion"]["audience"] == "bank"
+    assert verify(WALLET_PUB, data["assertion"], data["signature"])
+
+
 def test_audit_chain_is_valid_and_detects_tampering(wallet_client):
     register_and_login(wallet_client)
     from wallet_service.models import AuditLog

@@ -33,3 +33,12 @@ def process_payment(payload: dict) -> httpx.Response:
         f"{settings.bank_url}/transactions/process",
         **kwargs,
     )
+
+def redeem_tickets(payload: dict) -> httpx.Response:
+    """Envía los tickets firmados al Banco para confirmar su validez y evitar doble gasto."""
+    return httpx.post(
+        f"{settings.bank_url}/tickets/redeem",
+        json=payload,
+        headers={"X-API-Key": settings.bank_api_key},
+        timeout=10,
+    )
