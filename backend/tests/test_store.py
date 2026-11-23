@@ -146,3 +146,64 @@ def test_coupon_can_only_be_redeemed_once_per_user(wallet_client, store_client, 
     assert pay(second).status_code == 409  # el cupón ya fue canjeado por este usuario
     # y ya no se puede cotizar con él
     assert store_client.post("/cart/quote", json=body, headers=headers).status_code == 400
+
+class _FakeBankResponse:
+    def __init__(self, status_code, body):
+        self.status_code = status_code
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+def _create_and_sign(wallet_client, store_client, headers, product):
+    order = store_client.post(
+        "/orders", json={"items": [{"product_id": product["id"], "quantity": 1}]}, headers=headers
+    ).json()
+    signed = wallet_client.post(
+        "/payments/authorize",
+        json={"order_id": order["order_id"], "merchant": order["merchant"], "amount_cents": order["amount_cents"]},
+        headers=headers,
+    ).json()
+    return order, signed
+
+
+def _stock(store_client, product_id):
+    return next(p["stock"] for p in store_client.get("/products").json() if p["id"] == product_id)
+
+
+def test_rejected_payment_restores_stock_and_allows_retry(wallet_client, store_client, bank_client, monkeypatch):
+    _, headers = register_and_login(wallet_client)
+    product = store_client.get("/products").json()[0]
+    order, signed = _create_and_sign(wallet_client, store_client, headers, product)
+    pay_url = f"/orders/{order['order_id']}/pay"
+
+    # El Banco rechaza el pago (por ejemplo, fondos insuficientes)
+    monkeypatch.setattr(
+        "store_service.routers.orders.process_payment",
+        lambda payload: _FakeBankResponse(402, {"detail": "Fondos insuficientes"}),
+    )
+    assert store_client.post(pay_url, json=signed, headers=headers).status_code == 402
+    assert store_client.get(f"/orders/{order['order_id']}", headers=headers).json()["status"] == "pending"
+    assert _stock(store_client, product["id"]) == product["stock"]  # el stock se devolvió
+
+    # La misma orden se puede volver a pagar
+    _bank_to_memory(monkeypatch, bank_client)
+    assert store_client.post(pay_url, json=signed, headers=headers).status_code == 200
+    assert _stock(store_client, product["id"]) == product["stock"] - 1
+
+
+def test_invalid_bank_receipt_marks_order_failed(wallet_client, store_client, bank_client, monkeypatch):
+    _bank_to_memory(monkeypatch, bank_client)
+    _, headers = register_and_login(wallet_client)
+    product = store_client.get("/products").json()[0]
+    order, signed = _create_and_sign(wallet_client, store_client, headers, product)
+
+    monkeypatch.setattr("store_service.routers.orders.verify", lambda *args, **kwargs: False)
+    pay_url = f"/orders/{order['order_id']}/pay"
+    assert store_client.post(pay_url, json=signed, headers=headers).status_code == 502
+
+    assert store_client.get(f"/orders/{order['order_id']}", headers=headers).json()["status"] == "failed"
+    assert _stock(store_client, product["id"]) == product["stock"]
+    # Una orden en failed no se reintenta sola
+    assert store_client.post(pay_url, json=signed, headers=headers).status_code == 409

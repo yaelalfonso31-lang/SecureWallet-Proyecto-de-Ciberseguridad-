@@ -2,7 +2,12 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/security/receipt_verifier.dart';
 import 'cart_provider.dart';
+
+/// Clave pública Ed25519 del Banco (base64url). Se pasa al compilar con
+/// --dart-define=BANK_PUBLIC_KEY=... Es pública, pero cada backend local tiene la suya.
+const String _bankPublicKey = String.fromEnvironment('BANK_PUBLIC_KEY');
 
 class QuoteLine {
   const QuoteLine({
@@ -53,21 +58,107 @@ class Quote {
       );
 }
 
+class OrderDraft {
+  const OrderDraft({required this.orderId, required this.merchant, required this.amountCents});
+
+  final String orderId;
+  final String merchant;
+  final int amountCents;
+
+  factory OrderDraft.fromJson(Map<String, dynamic> j) => OrderDraft(
+        orderId: j['order_id'] as String,
+        merchant: j['merchant'] as String,
+        amountCents: j['amount_cents'] as int,
+      );
+}
+
+enum ReceiptStatus { verified, invalid, unchecked }
+
+class PaidOrder {
+  const PaidOrder({
+    required this.orderId,
+    required this.amountCents,
+    required this.receiptStatus,
+  });
+
+  final String orderId;
+  final int amountCents;
+  final ReceiptStatus receiptStatus;
+}
+
 class StoreRepository {
-  StoreRepository(this._dio);
-  final Dio _dio;
+  StoreRepository(this._store, this._wallet, this._verifier);
+
+  final Dio _store;
+  final Dio _wallet;
+  final ReceiptVerifier _verifier;
 
   Future<Quote> quote(List<CartLine> lines, {String? coupon}) async {
-    final res = await _dio.post('/cart/quote', data: {
-      'items': [
-        for (final l in lines) {'product_id': l.productId, 'quantity': l.quantity},
-      ],
-      if (coupon != null && coupon.isNotEmpty) 'coupon_code': coupon,
-    });
+    final res = await _store.post('/cart/quote', data: _orderBody(lines, coupon));
     return Quote.fromJson(res.data as Map<String, dynamic>);
   }
+
+  Future<OrderDraft> createOrder(List<CartLine> lines, {String? coupon}) async {
+    final res = await _store.post('/orders', data: _orderBody(lines, coupon));
+    return OrderDraft.fromJson(res.data as Map<String, dynamic>);
+  }
+
+  /// La Wallet firma la orden de pago (Ed25519). Devuelve la orden firmada tal cual.
+  Future<Map<String, dynamic>> authorize(OrderDraft order) async {
+    final res = await _wallet.post('/payments/authorize', data: {
+      'order_id': order.orderId,
+      'merchant': order.merchant,
+      'amount_cents': order.amountCents,
+    });
+    return res.data as Map<String, dynamic>;
+  }
+
+  Future<PaidOrder> pay(OrderDraft order, Map<String, dynamic> signed) async {
+    final res = await _store.post('/orders/${order.orderId}/pay', data: signed);
+    final data = res.data as Map<String, dynamic>;
+    final receipt = Map<String, dynamic>.from(data['receipt'] as Map);
+    final signature = data['signature'] as String;
+    return PaidOrder(
+      orderId: order.orderId,
+      amountCents: order.amountCents,
+      receiptStatus: await _checkReceipt(order, receipt, signature),
+    );
+  }
+
+  /// Verifica la firma del Banco y que el recibo corresponda a ESTA compra.
+  Future<ReceiptStatus> _checkReceipt(
+    OrderDraft order,
+    Map<String, dynamic> receipt,
+    String signature,
+  ) async {
+    if (_bankPublicKey.isEmpty) return ReceiptStatus.unchecked;
+    try {
+      final signatureOk = await _verifier.verify(
+        payload: receipt,
+        signatureB64: signature,
+        publicKeyB64: _bankPublicKey,
+      );
+      final matches = receipt['status'] == 'approved' &&
+          receipt['order_id'] == order.orderId &&
+          receipt['amount_cents'] == order.amountCents;
+      return signatureOk && matches ? ReceiptStatus.verified : ReceiptStatus.invalid;
+    } catch (_) {
+      return ReceiptStatus.invalid;
+    }
+  }
+
+  Map<String, dynamic> _orderBody(List<CartLine> lines, String? coupon) => {
+        'items': [
+          for (final l in lines) {'product_id': l.productId, 'quantity': l.quantity},
+        ],
+        if (coupon != null && coupon.isNotEmpty) 'coupon_code': coupon,
+      };
 }
 
 final storeRepositoryProvider = Provider<StoreRepository>(
-  (ref) => StoreRepository(ref.watch(storeDioProvider)),
+  (ref) => StoreRepository(
+    ref.watch(storeDioProvider),
+    ref.watch(walletDioProvider),
+    ReceiptVerifier(),
+  ),
 );

@@ -3,6 +3,7 @@ import secrets
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from shared.config import settings
@@ -18,6 +19,15 @@ from store_service.schemas import OrderCreateIn
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 MERCHANT = "SecureStore"
+
+# Estados: pending -> processing -> paid.
+# Si el pago falla vuelve a pending; si el recibo es sospechoso queda en failed (revisión manual).
+PENDING, PROCESSING, PAID, FAILED = "pending", "processing", "paid", "failed"
+NOT_PAYABLE = "La orden ya fue pagada o se está procesando"
+
+
+class SuspectReceipt(HTTPException):
+    """El Banco respondió, pero el recibo no se pudo verificar o no coincide con la compra."""
 
 
 def _get_own_order(db: Session, order_id: str, user_id: str) -> Order:
@@ -58,6 +68,56 @@ def create_order(body: OrderCreateIn, user_id: str = Depends(current_user_id), d
     }
 
 
+# ---------- helpers del pago ----------
+
+
+def _set_status(db: Session, order_id: str, status: str) -> None:
+    db.execute(update(Order).where(Order.order_id == order_id).values(status=status))
+    db.commit()
+
+
+def _claim_order(db: Session, order_id: str) -> bool:
+    """pending -> processing de forma atómica. Solo una petición puede ganar."""
+    result = db.execute(
+        update(Order).where(Order.order_id == order_id, Order.status == PENDING).values(status=PROCESSING)
+    )
+    db.commit()
+    return result.rowcount == 1
+
+
+def _reserve_stock(db: Session, items: list[dict]) -> None:
+    """Descuenta existencias con UPDATE condicional: nunca deja el stock negativo."""
+    for item in items:
+        result = db.execute(
+            update(Product)
+            .where(Product.id == item["product_id"], Product.stock >= item["quantity"])
+            .values(stock=Product.stock - item["quantity"])
+        )
+        if result.rowcount != 1:
+            db.rollback()  # deshace también lo ya descontado en esta misma transacción
+            raise HTTPException(409, "Sin existencias suficientes")
+    db.commit()
+
+
+def _release_stock(db: Session, items: list[dict]) -> None:
+    for item in items:
+        db.execute(
+            update(Product).where(Product.id == item["product_id"]).values(stock=Product.stock + item["quantity"])
+        )
+    db.commit()
+
+
+def _compensate(db: Session, order: Order, items: list[dict], *, stock: bool, coupon: bool, final_status: str) -> None:
+    """Deshace lo reservado antes de cobrar y deja la orden en su estado final."""
+    order_id = order.order_id
+    db.rollback()
+    if coupon:
+        release_coupon(db, order)
+    if stock:
+        _release_stock(db, items)
+    _set_status(db, order_id, final_status)
+
+
 def _charge_and_confirm(db: Session, order: Order, body: SignedOrder) -> dict:
     """Manda la orden firmada al Banco, verifica el recibo y marca la orden como pagada."""
     try:
@@ -78,31 +138,28 @@ def _charge_and_confirm(db: Session, order: Order, body: SignedOrder) -> dict:
 
     # El recibo debe venir firmado por el Banco y coincidir con la compra.
     if not verify(settings.bank_signing_public_key, receipt, signature):
-        raise HTTPException(502, "Recibo del banco con firma inválida")
+        raise SuspectReceipt(502, "Recibo del banco con firma inválida")
     if (
         receipt.get("status") != "approved"
         or receipt.get("order_id") != order.order_id
         or receipt.get("amount_cents") != order.total_cents
     ):
-        raise HTTPException(502, "Recibo del banco inconsistente")
+        raise SuspectReceipt(502, "Recibo del banco inconsistente")
 
-    for item in json.loads(order.items_json):
-        product = db.get(Product, item["product_id"])
-        product.stock -= item["quantity"]
-    order.status = "paid"
+    order.status = PAID
     order.receipt_json = json.dumps(receipt)
     order.receipt_signature = signature
     db.commit()
 
-    return {"order_id": order.order_id, "status": "paid", "receipt": receipt, "signature": signature}
+    return {"order_id": order.order_id, "status": PAID, "receipt": receipt, "signature": signature}
 
 
 @router.post("/{order_id}/pay")
 def pay_order(order_id: str, body: SignedOrder, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     """Recibe la orden firmada por la Wallet, la manda al Banco y verifica el recibo firmado."""
     order = _get_own_order(db, order_id, user_id)
-    if order.status != "pending":
-        raise HTTPException(409, "La orden ya fue pagada")
+    if order.status != PENDING:
+        raise HTTPException(409, NOT_PAYABLE)
 
     signed = body.order
     if (
@@ -113,15 +170,28 @@ def pay_order(order_id: str, body: SignedOrder, user_id: str = Depends(current_u
     ):
         raise HTTPException(400, "La orden firmada no coincide con la compra")
 
-    # Se consume el cupón antes de cobrar; si el pago falla, se devuelve.
-    has_coupon = bool(order.coupon_code)
-    if has_coupon:
-        reserve_coupon(db, order, user_id)
+    # 1) Reclamar la orden: si dos peticiones llegan a la vez, solo una continúa.
+    if not _claim_order(db, order_id):
+        raise HTTPException(409, NOT_PAYABLE)
+
+    items = json.loads(order.items_json)
+    stock_reserved = coupon_reserved = False
     try:
+        # 2) Reservar existencias y cupón ANTES de cobrar.
+        _reserve_stock(db, items)
+        stock_reserved = True
+        if order.coupon_code:
+            reserve_coupon(db, order, user_id)
+            coupon_reserved = True
+        # 3) Cobrar y verificar el recibo.
         return _charge_and_confirm(db, order, body)
+    except SuspectReceipt:
+        # El Banco pudo haber cobrado: no se reintenta sola, queda para revisión.
+        _compensate(db, order, items, stock=stock_reserved, coupon=coupon_reserved, final_status=FAILED)
+        raise
     except Exception:
-        if has_coupon:
-            release_coupon(db, order)
+        # Nada se cobró: se devuelve todo y la orden se puede volver a intentar.
+        _compensate(db, order, items, stock=stock_reserved, coupon=coupon_reserved, final_status=PENDING)
         raise
 
 

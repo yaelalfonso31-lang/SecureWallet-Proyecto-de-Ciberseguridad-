@@ -3,9 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../../core/security/biometric_service.dart';
 import '../data/cart_provider.dart';
 import '../data/store_repository.dart';
-import 'store_page.dart' show formatPrice;
+import 'payment_result_page.dart';
+import 'store_page.dart' show formatPrice, productsProvider;
+
+class _PayException implements Exception {
+  const _PayException(this.message);
+  final String message;
+}
 
 class CartPage extends ConsumerStatefulWidget {
   const CartPage({super.key});
@@ -16,11 +23,14 @@ class CartPage extends ConsumerStatefulWidget {
 
 class _CartPageState extends ConsumerState<CartPage> {
   final _couponCtrl = TextEditingController();
+  final _biometric = BiometricService();
   Quote? _quote;
   String? _coupon; // cupón que se está intentando aplicar
   String? _couponError;
   String? _error;
+  String? _payError;
   bool _loading = false;
+  bool _paying = false;
   int _seq = 0; // descarta respuestas viejas si el carrito cambia rápido
 
   @override
@@ -36,6 +46,7 @@ class _CartPageState extends ConsumerState<CartPage> {
   }
 
   Future<void> _refresh() async {
+    if (!mounted) return;
     final lines = ref.read(cartProvider);
     if (lines.isEmpty) {
       setState(() {
@@ -94,6 +105,53 @@ class _CartPageState extends ConsumerState<CartPage> {
     _refresh();
   }
 
+  Future<void> _pay() async {
+    final quote = _quote;
+    final lines = ref.read(cartProvider);
+    if (quote == null || lines.isEmpty || _paying || _loading) return;
+
+    setState(() {
+      _paying = true;
+      _payError = null;
+    });
+    final repo = ref.read(storeRepositoryProvider);
+
+    try {
+      // 1) Biometría antes de cualquier operación sensible.
+      if (!await _biometric.isAvailable()) {
+        throw const _PayException('Configura un PIN o huella en el dispositivo para poder pagar');
+      }
+      final confirmed = await _biometric.authenticate('Confirma el pago de ${formatPrice(quote.totalCents)}');
+      if (!confirmed) throw const _PayException('Pago cancelado: no se confirmó tu identidad');
+
+      // 2) Crear la orden. El servidor vuelve a calcular el total.
+      final order = await repo.createOrder(lines, coupon: quote.couponCode);
+
+      // 3) Solo se firma el monto que el usuario vio y confirmó.
+      if (order.amountCents != quote.totalCents) {
+        await _refresh();
+        throw _PayException('El total cambió a ${formatPrice(order.amountCents)}. Revisa tu carrito.');
+      }
+
+      // 4) La Wallet firma la orden y 5) la Tienda la cobra con el Banco.
+      final signed = await repo.authorize(order);
+      final paid = await repo.pay(order, signed);
+
+      ref.read(cartProvider.notifier).clear();
+      ref.invalidate(productsProvider); // refresca existencias del catálogo
+      if (!mounted) return;
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => PaymentResultPage(paid: paid)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _paying = false;
+        _payError = e is _PayException ? e.message : errorMessage(e);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen(cartProvider, (_, __) => _refresh());
@@ -101,6 +159,7 @@ class _CartPageState extends ConsumerState<CartPage> {
     final cart = ref.read(cartProvider.notifier);
     final priceByProduct = {for (final l in _quote?.lines ?? const <QuoteLine>[]) l.productId: l};
     final appliedCoupon = _quote?.couponCode;
+    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Carrito')),
@@ -109,7 +168,7 @@ class _CartPageState extends ConsumerState<CartPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                if (_loading) const LinearProgressIndicator(),
+                if (_loading || _paying) const LinearProgressIndicator(),
                 for (final l in lines)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -122,19 +181,19 @@ class _CartPageState extends ConsumerState<CartPage> {
                       children: [
                         IconButton(
                           icon: const Icon(Icons.remove_circle_outline),
-                          onPressed: () => cart.decrement(l.productId),
+                          onPressed: _paying ? null : () => cart.decrement(l.productId),
                         ),
                         Text('${l.quantity}'),
                         IconButton(
                           icon: const Icon(Icons.add_circle_outline),
-                          onPressed: l.quantity < kMaxQtyPerProduct
-                              ? () => cart.add(l.productId, l.name)
-                              : null,
+                          onPressed: (_paying || l.quantity >= kMaxQtyPerProduct)
+                              ? null
+                              : () => cart.add(l.productId, l.name),
                         ),
                         IconButton(
                           tooltip: 'Quitar',
                           icon: const Icon(Icons.delete_outline),
-                          onPressed: () => cart.remove(l.productId),
+                          onPressed: _paying ? null : () => cart.remove(l.productId),
                         ),
                       ],
                     ),
@@ -144,7 +203,7 @@ class _CartPageState extends ConsumerState<CartPage> {
                   Chip(
                     avatar: const Icon(Icons.local_offer, size: 18),
                     label: Text('Cupón $appliedCoupon'),
-                    onDeleted: _removeCoupon,
+                    onDeleted: _paying ? null : _removeCoupon,
                   )
                 else
                   Row(
@@ -152,6 +211,7 @@ class _CartPageState extends ConsumerState<CartPage> {
                       Expanded(
                         child: TextField(
                           controller: _couponCtrl,
+                          enabled: !_paying,
                           textCapitalization: TextCapitalization.characters,
                           maxLength: 32,
                           decoration: InputDecoration(
@@ -163,18 +223,34 @@ class _CartPageState extends ConsumerState<CartPage> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      FilledButton(onPressed: _loading ? null : _applyCoupon, child: const Text('Aplicar')),
+                      FilledButton(
+                        onPressed: (_loading || _paying) ? null : _applyCoupon,
+                        child: const Text('Aplicar'),
+                      ),
                     ],
                   ),
                 const SizedBox(height: 16),
                 if (_error != null)
-                  Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))
+                  Text(_error!, style: TextStyle(color: scheme.error))
                 else if (_quote != null) ...[
                   _row('Subtotal', formatPrice(_quote!.subtotalCents)),
                   if (_quote!.discountCents > 0) _row('Descuento', '-${formatPrice(_quote!.discountCents)}'),
                   const SizedBox(height: 4),
                   _row('Total', formatPrice(_quote!.totalCents), bold: true),
                 ],
+                const SizedBox(height: 24),
+                if (_payError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(_payError!, style: TextStyle(color: scheme.error)),
+                  ),
+                FilledButton.icon(
+                  onPressed: (_quote == null || _error != null || _loading || _paying) ? null : _pay,
+                  icon: _paying
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.account_balance_wallet),
+                  label: Text(_paying ? 'Procesando…' : 'Pagar con Wallet'),
+                ),
               ],
             ),
     );

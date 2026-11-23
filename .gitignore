@@ -31,3 +31,5 @@ local.properties
 .vscode/
 .DS_Store
 Thumbs.db
+
+mobile/dart_defines.json
