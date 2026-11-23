@@ -143,3 +143,31 @@ def test_full_cycle_bank_to_wallet_and_back(wallet_client, bank_client, bank_cus
 
     # El mismo comprobante de retiro no se puede cobrar dos veces en el Banco.
     assert bank_client.post("/transfers/from-wallet", json=voucher.json(), headers=bank_headers).status_code == 409
+
+
+def test_p2p_transfer_moves_real_balance_and_records_movements(wallet_client):
+    user_a, headers_a = _user(wallet_client)
+    email_b, headers_b = register_and_login(wallet_client)
+
+    wallet_client.post("/wallet/topup", json=_bank_voucher(user_a, 10_000), headers=headers_a)
+
+    # No permite enviarse a sí mismo
+    email_a = wallet_client.get("/auth/me", headers=headers_a).json()["email"]
+    assert wallet_client.post(
+        "/wallet/transfer", json={"recipient_email": email_a, "amount_cents": 1000}, headers=headers_a
+    ).status_code == 400
+
+    # Transferencia válida hacia B
+    r = wallet_client.post(
+        "/wallet/transfer",
+        json={"recipient_email": email_b, "amount_cents": 3500, "note": "Cena"},
+        headers=headers_a,
+    )
+    assert r.status_code == 200, r.text
+    assert _balance(wallet_client, headers_a) == 6500
+    assert _balance(wallet_client, headers_b) == 3500
+
+    mov_a = wallet_client.get("/wallet/movements", headers=headers_a).json()
+    mov_b = wallet_client.get("/wallet/movements", headers=headers_b).json()
+    assert mov_a[0]["kind"] == "debit" and mov_a[0]["amount_cents"] == 3500
+    assert mov_b[0]["kind"] == "credit" and mov_b[0]["amount_cents"] == 3500

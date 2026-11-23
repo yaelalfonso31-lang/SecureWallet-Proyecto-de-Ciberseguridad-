@@ -15,8 +15,7 @@ def _resolve_cert_path(rel_path: str) -> str:
     return rel_path
 
 
-def process_payment(payload: dict) -> httpx.Response:
-    """Envía la orden firmada al Banco. Si BANK_URL es https, usa mTLS con los certificados configurados."""
+def _post_bank(path: str, payload: dict) -> httpx.Response:
     kwargs = {
         "json": payload,
         "headers": {"X-API-Key": settings.bank_api_key},
@@ -28,17 +27,14 @@ def process_payment(payload: dict) -> httpx.Response:
             _resolve_cert_path(settings.mtls_store_cert),
             _resolve_cert_path(settings.mtls_store_key),
         )
+    return httpx.post(f"{settings.bank_url}{path}", **kwargs)
 
-    return httpx.post(
-        f"{settings.bank_url}/transactions/process",
-        **kwargs,
-    )
+
+def process_payment(payload: dict) -> httpx.Response:
+    """Envía la orden firmada al Banco usando mTLS si BANK_URL es https."""
+    return _post_bank("/transactions/process", payload)
+
 
 def redeem_tickets(payload: dict) -> httpx.Response:
-    """Envía los tickets firmados al Banco para confirmar su validez y evitar doble gasto."""
-    return httpx.post(
-        f"{settings.bank_url}/tickets/redeem",
-        json=payload,
-        headers={"X-API-Key": settings.bank_api_key},
-        timeout=10,
-    )
+    """Envía los tickets firmados al Banco usando mTLS si BANK_URL es https."""
+    return _post_bank("/tickets/redeem", payload)

@@ -23,11 +23,13 @@ class AuthRepository {
     });
   }
 
-  Future<void> login(String email, String password) async {
-    final res = await _dio.post<dynamic>(
-      '/auth/login',
-      data: {'email': email, 'password': password},
-    );
+  Future<void> login(String email, String password, {String? totpCode}) async {
+    final res = await _dio.post<dynamic>('/auth/login', data: {
+      'email': email,
+      'password': password,
+      if (totpCode != null && totpCode.trim().isNotEmpty)
+        'totp_code': totpCode.trim(),
+    });
     await _store.saveToken(res.data['access_token'] as String);
   }
 
@@ -43,8 +45,31 @@ class AuthRepository {
   Future<void> logout() => _store.clear();
 }
 
+// 1. En el modelo de perfil (UserProfile / UserOut):
+class UserProfile {
+  const UserProfile({
+    required this.id,
+    required this.email,
+    required this.fullName,
+    this.totpEnabled = false,
+  });
+
+  factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
+        id: json['id'] as String,
+        email: json['email'] as String,
+        fullName: json['full_name'] as String,
+        totpEnabled: (json['totp_enabled'] as bool?) ?? false,
+      );
+
+  final String id;
+  final String email;
+  final String fullName;
+  final bool totpEnabled;
+}
+
 final authRepositoryProvider = Provider<AuthRepository>(
-  (ref) => AuthRepository(ref.watch(walletDioProvider), ref.watch(secureStoreProvider)),
+  (ref) => AuthRepository(
+      ref.watch(walletDioProvider), ref.watch(secureStoreProvider)),
 );
 
 final profileProvider = FutureProvider.autoDispose<UserProfile>(

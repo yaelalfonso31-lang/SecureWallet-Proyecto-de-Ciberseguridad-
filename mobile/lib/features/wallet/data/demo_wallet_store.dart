@@ -42,37 +42,41 @@ class DemoWalletNotifier extends Notifier<DemoWalletState> {
       ],
       transactions: [
         WalletTransaction(
-          id: 'tx_seed_1',
-          kind: TxKind.payment,
-          title: 'Café Central',
-          subtitle: 'Pago con Wallet',
-          amountCents: -8500,
-          date: now.subtract(const Duration(hours: 2)),
-        ),
+            id: 'tx_seed_1',
+            kind: TxKind.payment,
+            title: 'Café Central',
+            subtitle: 'Pago con Wallet',
+            amountCents: -8500,
+            date: now.subtract(const Duration(hours: 2)),
+            counterparty: '',
+            createdAt: now.subtract(const Duration(hours: 2))),
         WalletTransaction(
-          id: 'tx_seed_2',
-          kind: TxKind.received,
-          title: 'Recibido de María Torres',
-          subtitle: 'Comida del viernes',
-          amountCents: 30000,
-          date: now.subtract(const Duration(hours: 20)),
-        ),
+            id: 'tx_seed_2',
+            kind: TxKind.received,
+            title: 'Recibido de María Torres',
+            subtitle: 'Comida del viernes',
+            amountCents: 30000,
+            date: now.subtract(const Duration(hours: 20)),
+            counterparty: '',
+            createdAt: now.subtract(const Duration(hours: 20))),
         WalletTransaction(
-          id: 'tx_seed_3',
-          kind: TxKind.topUp,
-          title: 'Recarga de saldo',
-          subtitle: 'Desde Visa •••• 1111',
-          amountCents: 50000,
-          date: now.subtract(const Duration(days: 1, hours: 3)),
-        ),
+            id: 'tx_seed_3',
+            kind: TxKind.topUp,
+            title: 'Recarga de saldo',
+            subtitle: 'Desde Visa •••• 1111',
+            amountCents: 50000,
+            date: now.subtract(const Duration(days: 1, hours: 3)),
+            counterparty: '',
+            createdAt: now.subtract(const Duration(days: 1, hours: 3))),
         WalletTransaction(
-          id: 'tx_seed_4',
-          kind: TxKind.payment,
-          title: 'Tienda: Teclado mecánico',
-          subtitle: 'Pago con Wallet',
-          amountCents: -129900,
-          date: now.subtract(const Duration(days: 3)),
-        ),
+            id: 'tx_seed_4',
+            kind: TxKind.payment,
+            title: 'Tienda: Teclado mecánico',
+            subtitle: 'Pago con Wallet',
+            amountCents: -129900,
+            date: now.subtract(const Duration(days: 3)),
+            counterparty: '',
+            createdAt: now.subtract(const Duration(days: 3))),
         WalletTransaction(
           id: 'tx_seed_5',
           kind: TxKind.promo,
@@ -80,6 +84,8 @@ class DemoWalletNotifier extends Notifier<DemoWalletState> {
           subtitle: 'Promoción del Banco',
           amountCents: 10000,
           date: now.subtract(const Duration(days: 5)),
+          counterparty: '',
+          createdAt: now.subtract(const Duration(days: 5)),
         ),
       ],
     );
@@ -98,6 +104,8 @@ class DemoWalletNotifier extends Notifier<DemoWalletState> {
       subtitle: subtitle,
       amountCents: signedCents,
       date: DateTime.now(),
+      counterparty: '',
+      createdAt: DateTime.now(),
     );
     state = state.copyWith(
       balanceCents: state.balanceCents + signedCents,
@@ -106,7 +114,8 @@ class DemoWalletNotifier extends Notifier<DemoWalletState> {
     return tx;
   }
 
-  WalletTransaction send(WalletContact to, int cents, {String note = ''}) => _record(
+  WalletTransaction send(WalletContact to, int cents, {String note = ''}) =>
+      _record(
         kind: TxKind.sent,
         title: 'Enviado a ${to.name}',
         subtitle: note.isEmpty ? 'Transferencia' : note,
@@ -133,7 +142,8 @@ class DemoWalletNotifier extends Notifier<DemoWalletState> {
 }
 
 final demoWalletProvider =
-    NotifierProvider<DemoWalletNotifier, DemoWalletState>(DemoWalletNotifier.new);
+    NotifierProvider<DemoWalletNotifier, DemoWalletState>(
+        DemoWalletNotifier.new);
 
 /// Preferencias de seguridad (locales de demostración).
 class SecuritySettings {

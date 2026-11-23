@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, EmailStr
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -52,6 +52,71 @@ class WithdrawIn(BaseModel):
 class TopupOut(BaseModel):
     status: str  # credited | already_credited
     balance_cents: int
+
+class TransferIn(BaseModel):
+    recipient_email: EmailStr
+    amount_cents: int = Field(gt=0, le=100_000_000)
+    note: str = Field(default="", max_length=140)
+
+
+class TransferOut(BaseModel):
+    transfer_id: str
+    recipient_email: str
+    recipient_name: str
+    amount_cents: int
+    balance_cents: int
+    note: str
+    created_at: datetime
+
+
+@router.post("/transfer", response_model=TransferOut)
+def transfer_p2p(body: TransferIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Envía saldo real de la Wallet a otro usuario registrado por correo."""
+    target_email = body.recipient_email.lower().strip()
+    if target_email == user.email.lower():
+        raise HTTPException(400, "No puedes transferirte saldo a ti mismo")
+
+    recipient = db.scalar(select(User).where(User.email == target_email))
+    if recipient is None:
+        raise HTTPException(404, "El destinatario no tiene cuenta en SecureWallet")
+
+    sender_account = _get_account(db, user.id)
+    if sender_account.balance_cents < body.amount_cents:
+        raise HTTPException(402, "Saldo insuficiente en la Wallet")
+
+    recipient_account = _get_account(db, recipient.id)
+    transfer_id = uuid.uuid4().hex
+    clean_note = body.note.strip()
+    suffix = f" ({clean_note})" if clean_note else ""
+
+    _apply(
+        db,
+        sender_account,
+        "debit",
+        body.amount_cents,
+        f"Envío a {recipient.full_name}{suffix}",
+        f"p2p_{transfer_id}_out",
+    )
+    _apply(
+        db,
+        recipient_account,
+        "credit",
+        body.amount_cents,
+        f"Recibido de {user.full_name}{suffix}",
+        f"p2p_{transfer_id}_in",
+    )
+    db.commit()
+
+    log_event(db, "wallet_transfer", user.id, detail=f"transfer={transfer_id} to={recipient.id}")
+    return TransferOut(
+        transfer_id=transfer_id,
+        recipient_email=recipient.email,
+        recipient_name=recipient.full_name,
+        amount_cents=body.amount_cents,
+        balance_cents=sender_account.balance_cents,
+        note=clean_note,
+        created_at=utcnow(),
+    )
 
 
 def _get_account(db: Session, user_id: str) -> WalletAccount:

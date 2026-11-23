@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -18,15 +19,18 @@ class LoginPage extends ConsumerStatefulWidget {
 class _LoginPageState extends ConsumerState<LoginPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _totp = TextEditingController();
   final _biometric = BiometricService();
   bool _loading = false;
   bool _obscure = true;
+  bool _needsTotp = false;
   String? _error;
 
   @override
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _totp.dispose();
     super.dispose();
   }
 
@@ -36,16 +40,34 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       setState(() => _error = 'Escribe tu correo y tu contraseña');
       return;
     }
+    if (_needsTotp && _totp.text.trim().length < 6) {
+      setState(() =>
+          _error = 'Ingresa el código de 6 dígitos de tu app autenticadora');
+      return;
+    }
+
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      await ref.read(authRepositoryProvider).login(email, _password.text);
+      await ref.read(authRepositoryProvider).login(
+            email,
+            _password.text,
+            totpCode: _needsTotp ? _totp.text.trim() : null,
+          );
+      ref.invalidate(profileProvider);
       if (!mounted) return;
       context.go('/home');
     } catch (e) {
-      if (mounted) setState(() => _error = errorMessage(e));
+      if (!mounted) return;
+      final msg = errorMessage(e);
+      setState(() {
+        if (msg.contains('2FA')) {
+          _needsTotp = true;
+        }
+        _error = msg;
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -56,25 +78,40 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     final repo = ref.read(authRepositoryProvider);
     if (!await repo.hasSession()) {
       if (mounted) {
-        showWalletSnack(context, 'Inicia sesión una vez con tu contraseña para usar la huella.', error: true);
+        showWalletSnack(
+          context,
+          'Inicia sesión una vez con tu contraseña para usar la huella.',
+          error: true,
+        );
       }
       return;
     }
     if (!await _biometric.isAvailable()) {
       if (mounted) {
-        showWalletSnack(context, 'Tu teléfono no tiene huella ni bloqueo de pantalla.', error: true);
+        showWalletSnack(
+          context,
+          'Tu teléfono no tiene huella ni bloqueo de pantalla.',
+          error: true,
+        );
       }
       return;
     }
-    final ok = await _biometric.authenticate('Confirma tu identidad para entrar a SecureWallet');
+    final ok = await _biometric.authenticate(
+      'Confirma tu identidad para entrar a SecureWallet',
+    );
     if (!ok || !mounted) return;
     try {
       await repo.fetchProfile();
+      ref.invalidate(profileProvider);
       if (!mounted) return;
       context.go('/home');
     } catch (_) {
       if (mounted) {
-        showWalletSnack(context, 'Tu sesión expiró. Ingresa con tu contraseña.', error: true);
+        showWalletSnack(
+          context,
+          'Tu sesión expiró. Ingresa con tu contraseña.',
+          error: true,
+        );
       }
     }
   }
@@ -94,12 +131,19 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   const SizedBox(height: 16),
                   const Text(
                     'SecureWallet',
-                    style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w900),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     'Tu dinero, protegido',
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 14),
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontSize: 14,
+                    ),
                   ),
                 ],
               ),
@@ -117,7 +161,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         children: [
                           const Text('Iniciar sesión', style: WalletText.h2),
                           const SizedBox(height: 4),
-                          const Text('Ingresa a tu cuenta para continuar', style: WalletText.muted),
+                          const Text(
+                            'Ingresa a tu cuenta para continuar',
+                            style: WalletText.muted,
+                          ),
                           const SizedBox(height: 20),
                           WalletTextField(
                             controller: _email,
@@ -133,13 +180,46 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                             label: 'Contraseña',
                             icon: Icons.lock_rounded,
                             obscure: _obscure,
-                            textInputAction: TextInputAction.done,
+                            textInputAction: _needsTotp
+                                ? TextInputAction.next
+                                : TextInputAction.done,
                             suffix: IconButton(
-                              tooltip: _obscure ? 'Mostrar contraseña' : 'Ocultar contraseña',
-                              icon: Icon(_obscure ? Icons.visibility_rounded : Icons.visibility_off_rounded),
-                              onPressed: () => setState(() => _obscure = !_obscure),
+                              tooltip: _obscure
+                                  ? 'Mostrar contraseña'
+                                  : 'Ocultar contraseña',
+                              icon: Icon(
+                                _obscure
+                                    ? Icons.visibility_rounded
+                                    : Icons.visibility_off_rounded,
+                              ),
+                              onPressed: () =>
+                                  setState(() => _obscure = !_obscure),
                             ),
                           ),
+                          if (_needsTotp) ...[
+                            const SizedBox(height: 14),
+                            TextField(
+                              controller: _totp,
+                              keyboardType: TextInputType.number,
+                              maxLength: 6,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                              textInputAction: TextInputAction.done,
+                              onSubmitted: (_) => _submit(),
+                              decoration: InputDecoration(
+                                labelText: 'Código 2FA (6 dígitos)',
+                                counterText: '',
+                                prefixIcon: const Icon(
+                                  Icons.phonelink_lock_rounded,
+                                  color: WalletColors.blue,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                            ),
+                          ],
                           if (_error != null) ...[
                             const SizedBox(height: 12),
                             InfoBanner(text: _error!, kind: BannerKind.danger),
@@ -176,7 +256,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.lock_rounded, size: 14, color: WalletColors.muted),
+                        Icon(Icons.lock_rounded,
+                            size: 14, color: WalletColors.muted),
                         SizedBox(width: 6),
                         Flexible(
                           child: Text(
