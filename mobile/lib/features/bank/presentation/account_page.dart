@@ -1,131 +1,145 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
+import '../../wallet/presentation/theme/wallet_format.dart';
+import '../../wallet/presentation/theme/wallet_palette.dart';
+import '../../wallet/presentation/widgets/wallet_widgets.dart';
+import '../data/bank_repository.dart';
+import 'bank_widgets.dart';
 
-/// Pantalla de saldo y movimientos de la cuenta bancaria (B3).
-///
-/// Recibe el [dio] **ya autenticado** con el token del Banco; la Persona 2 la
-/// enlaza desde el tablero (`bank_page.dart`) una vez exista la vinculación (B2).
-/// El número de cuenta llega enmascarado desde el Banco: aquí nunca se muestra completo.
-class AccountPage extends StatefulWidget {
-  const AccountPage({super.key, required this.dio});
-
-  final Dio dio;
+/// Detalle de la cuenta: tarjeta de saldo y movimientos agrupados por día, con paginación.
+class AccountPage extends ConsumerStatefulWidget {
+  const AccountPage({super.key});
 
   @override
-  State<AccountPage> createState() => _AccountPageState();
+  ConsumerState<AccountPage> createState() => _AccountPageState();
 }
 
-class _AccountData {
-  _AccountData(this.account, this.movements);
+class _AccountPageState extends ConsumerState<AccountPage> {
+  static const _pageSize = 20;
 
-  final Map<String, dynamic> account;
-  final List<dynamic> movements;
-}
+  final List<BankMovement> _movements = [];
+  bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  String? _error;
 
-class _AccountPageState extends State<AccountPage> {
-  late Future<_AccountData> _future = _load();
-
-  Future<_AccountData> _load() async {
-    final accountRes = await widget.dio.get('/accounts/me');
-    final movementsRes = await widget.dio.get(
-      '/accounts/me/movements',
-      queryParameters: {'limit': 20},
-    );
-    return _AccountData(
-      Map<String, dynamic>.from(accountRes.data as Map),
-      List<dynamic>.from(movementsRes.data as List),
-    );
+  @override
+  void initState() {
+    super.initState();
+    _load(reset: true);
   }
 
-  Future<void> _refresh() async {
-    setState(() => _future = _load());
+  Future<void> _load({bool reset = false}) async {
+    if (reset) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    } else {
+      setState(() => _loadingMore = true);
+    }
     try {
-      await _future;
-    } catch (_) {
-      // El error ya lo muestra el FutureBuilder.
+      final before = reset || _movements.isEmpty ? null : _movements.last.id;
+      final page = await ref.read(bankRepositoryProvider).movements(limit: _pageSize, before: before);
+      if (!mounted) return;
+      setState(() {
+        if (reset) _movements.clear();
+        _movements.addAll(page);
+        _hasMore = page.length == _pageSize;
+        _loading = false;
+        _loadingMore = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = errorMessage(e);
+        _loading = false;
+        _loadingMore = false;
+      });
     }
   }
 
-  String _money(int cents) => '\$${(cents / 100).toStringAsFixed(2)}';
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Mi cuenta')),
-      body: FutureBuilder<_AccountData>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text(errorMessage(snapshot.error!)));
-          }
-          final data = snapshot.data!;
-          final account = data.account;
-          return RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Saldo disponible', style: Theme.of(context).textTheme.labelLarge),
-                        const SizedBox(height: 8),
-                        Text(
-                          _money(account['balance_cents'] as int),
-                          style: Theme.of(context).textTheme.headlineMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        Text('${account['account_number_masked']} · ${account['currency']}'),
-                        Text('Estado: ${account['status']}'),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text('Movimientos', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                if (data.movements.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Center(child: Text('Aún no hay movimientos')),
-                  )
-                else
-                  for (final m in data.movements) _MovementTile(m: m, money: _money),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+  Future<void> _refresh() async {
+    ref.invalidate(bankAccountProvider);
+    await _load(reset: true);
   }
-}
 
-class _MovementTile extends StatelessWidget {
-  const _MovementTile({required this.m, required this.money});
-
-  final dynamic m;
-  final String Function(int) money;
+  List<Widget> _rows() {
+    final rows = <Widget>[];
+    String? lastDay;
+    for (final m in _movements) {
+      final label = dayLabel(m.createdAt.toLocal());
+      if (label != lastDay) {
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+            child: Text(
+              label.toUpperCase(),
+              style: WalletText.muted.copyWith(fontWeight: FontWeight.w800, letterSpacing: 1),
+            ),
+          ),
+        );
+        lastDay = label;
+      }
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: SoftCard(padding: EdgeInsets.zero, child: BankMovementTile(movement: m)),
+        ),
+      );
+    }
+    return rows;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isDebit = m['kind'] == 'debit';
-    final color = isDebit ? Colors.red : Colors.green;
-    return ListTile(
-      leading: Icon(isDebit ? Icons.arrow_upward : Icons.arrow_downward, color: color),
-      title: Text('${m['concept']}'),
-      subtitle: Text('Saldo: ${money(m['balance_after_cents'] as int)}'),
-      trailing: Text(
-        '${isDebit ? '-' : '+'}${money(m['amount_cents'] as int)}',
-        style: TextStyle(color: color, fontWeight: FontWeight.bold),
+    final account = ref.watch(bankAccountProvider);
+    return Scaffold(
+      backgroundColor: WalletColors.background,
+      appBar: AppBar(title: const Text('Mi cuenta')),
+      body: RefreshIndicator(
+        color: WalletColors.blue,
+        onRefresh: _refresh,
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: 28),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: account.when(
+                loading: () => const SizedBox(height: 150, child: Center(child: CircularProgressIndicator())),
+                error: (e, _) => InfoBanner(kind: BannerKind.danger, text: errorMessage(e)),
+                data: (a) => BankAccountCard(account: a),
+              ),
+            ),
+            const SectionTitle('Movimientos'),
+            if (_loading)
+              const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()))
+            else if (_error != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: InfoBanner(kind: BannerKind.danger, text: _error!),
+              )
+            else if (_movements.isEmpty)
+              const EmptyState(
+                icon: Icons.receipt_long_rounded,
+                title: 'Sin movimientos',
+                message: 'Tus depósitos, compras y transferencias aparecerán aquí.',
+              )
+            else
+              ..._rows(),
+            if (_hasMore && !_loading && _error == null && _movements.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: SecondaryButton(
+                  label: _loadingMore ? 'Cargando…' : 'Cargar más movimientos',
+                  icon: Icons.expand_more_rounded,
+                  onPressed: _loadingMore ? null : _load,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -19,6 +19,7 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
+    totp_code: str | None = Field(default=None, min_length=6, max_length=8)
 
 
 class TokenOut(BaseModel):
@@ -32,6 +33,7 @@ class UserOut(BaseModel):
     id: str
     email: EmailStr
     full_name: str
+    totp_enabled: bool = False
 
 
 class CardIn(BaseModel):
@@ -60,3 +62,26 @@ class PaymentRequest(BaseModel):
     amount_cents: int = Field(gt=0, le=100_000_000)
     currency: str = Field(default="MXN", pattern=r"^[A-Z]{3}$")
     card_id: str | None = None
+    totp_code: str | None = Field(default=None, min_length=6, max_length=8)
+
+
+class TotpSetupOut(BaseModel):
+    secret: str
+    provisioning_uri: str
+
+
+class TotpCodeIn(BaseModel):
+    code: str = Field(min_length=6, max_length=8)
+
+class BankLinkAssertionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    wallet_user_id: str = Field(min_length=1, max_length=64)
+    nonce: str = Field(min_length=16, max_length=64)
+    timestamp: int
+    audience: str = Field(default="bank", max_length=20)
+
+
+class BankLinkAssertionOut(BaseModel):
+    assertion: BankLinkAssertionPayload
+    signature: str

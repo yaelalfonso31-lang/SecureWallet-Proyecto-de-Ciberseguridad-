@@ -12,22 +12,26 @@ from wallet_service.database import get_db
 from wallet_service.deps import get_current_user
 from wallet_service.models import Card, User
 from wallet_service.schemas import PaymentRequest
+import pyotp
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 
 @router.post("/authorize", response_model=SignedOrder)
 def authorize(body: PaymentRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """La Wallet firma la orden de pago. El Banco verificará esta firma.
 
-    TODO equipo Wallet: exigir re-autenticación (PIN/biometría/TOTP) antes de firmar.
-    """
     card_token = None
     if body.card_id:
         card = db.get(Card, body.card_id)
         if card is None or card.user_id != user.id:
             raise HTTPException(404, "Tarjeta no encontrada")
         card_token = card.token
+
+    if user.totp_enabled:
+        if not body.totp_code or not user.totp_secret:
+            raise HTTPException(403, "Se requiere código 2FA (TOTP) para autorizar el pago")
+        if not pyotp.TOTP(user.totp_secret).verify(body.totp_code.strip(), valid_window=1):
+            raise HTTPException(403, "Código 2FA (TOTP) inválido")
 
     order = PaymentOrder(
         order_id=body.order_id,

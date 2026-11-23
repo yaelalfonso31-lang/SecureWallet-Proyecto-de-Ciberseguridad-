@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from shared.timeutil import utcnow
@@ -22,6 +22,8 @@ class User(Base):
     failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Card(Base):
@@ -38,7 +40,6 @@ class Card(Base):
     pan_encrypted: Mapped[str] = mapped_column(Text)  # AES-256-GCM; nunca se guarda el CVV
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
-
 class AuditLog(Base):
     """Bitácora con hashes encadenados para demostrar integridad y no repudio."""
 
@@ -51,3 +52,30 @@ class AuditLog(Base):
     prev_hash: Mapped[str] = mapped_column(String(64))
     hash: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class WalletAccount(Base):
+    """Saldo de la Wallet de un usuario (centavos). Una fila por usuario."""
+
+    __tablename__ = "wallet_accounts"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    balance_cents: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class WalletMovement(Base):
+    """Movimiento inmutable del saldo de la Wallet (abono o cargo)."""
+
+    __tablename__ = "wallet_movements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(10))  # credit | debit
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    balance_after_cents: Mapped[int] = mapped_column(Integer)
+    concept: Mapped[str] = mapped_column(String(200), default="")
+    # id de la transferencia con el Banco. UNIQUE: una recarga no puede abonarse dos veces.
+    reference: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+

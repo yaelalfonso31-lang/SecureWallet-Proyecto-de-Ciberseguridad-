@@ -1,6 +1,42 @@
 """Contratos compartidos entre Wallet, Banco y Tienda."""
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+TICKET_DENOMINATIONS = (5_000, 10_000, 20_000, 50_000)  # $50, $100, $200, $500 MXN en centavos
+
+class ElectronicTicket(BaseModel):
+    """Ticket electrónico prepagado emitido y firmado por el Banco."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ticket_id: str = Field(min_length=1, max_length=64)
+    issuer: str = Field(default="BancoAzul", max_length=64)
+    owner_ref: str = Field(min_length=1, max_length=64)
+    amount_cents: int
+    currency: str = Field(default="MXN", pattern=r"^[A-Z]{3}$")
+    nonce: str = Field(min_length=16, max_length=64)
+    issued_at: int
+    expires_at: int
+
+    @field_validator("amount_cents")
+    @classmethod
+    def valid_denomination(cls, v: int) -> int:
+        if v not in TICKET_DENOMINATIONS:
+            raise ValueError("Denominación no permitida (usa $50, $100, $200 o $500)")
+        return v
+
+class SignedTicket(BaseModel):
+    ticket: ElectronicTicket
+    signature: str
+
+class TicketRedeemIn(BaseModel):
+    """Petición servicio-a-servicio (Tienda -> Banco) para canjear tickets en una orden."""
+
+    order_id: str = Field(min_length=1, max_length=64)
+    merchant: str = Field(min_length=1, max_length=100)
+    amount_cents: int = Field(gt=0, le=100_000_000)
+    currency: str = Field(default="MXN", pattern=r"^[A-Z]{3}$")
+    payer: str = Field(min_length=1, max_length=64)
+    tickets: list[SignedTicket] = Field(min_length=1, max_length=20)
 
 class PaymentOrder(BaseModel):
     """Orden de pago que firma la Wallet y valida el Banco."""
@@ -16,16 +52,13 @@ class PaymentOrder(BaseModel):
     nonce: str = Field(min_length=16, max_length=64)  # anti-replay
     timestamp: int  # epoch en segundos (anti-replay)
 
-
 class SignedOrder(BaseModel):
     order: PaymentOrder
     signature: str
 
-
 class SignedReceipt(BaseModel):
     receipt: dict
     signature: str
-
 
 class TransferVoucher(BaseModel):
     """Comprobante de transferencia banco <-> wallet (B5).
@@ -43,7 +76,6 @@ class TransferVoucher(BaseModel):
     nonce: str = Field(min_length=16, max_length=64)  # anti-replay
     timestamp: int  # epoch en segundos (frescura)
     direction: str = Field(pattern=r"^(to_wallet|from_wallet)$")
-
 
 class SignedVoucher(BaseModel):
     voucher: TransferVoucher

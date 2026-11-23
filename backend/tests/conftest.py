@@ -23,6 +23,7 @@ os.environ.update(
         "BANK_SIGNING_PRIVATE_KEY": BANK_PRIV,
         "BANK_SIGNING_PUBLIC_KEY": BANK_PUB,
         "BANK_API_KEY": BANK_API_KEY,
+        "RATE_LIMIT_PER_MINUTE": "0",
     }
 )
 

@@ -13,6 +13,7 @@ from wallet_service.database import get_db
 from wallet_service.deps import get_current_user
 from wallet_service.models import User
 from wallet_service.schemas import LoginIn, RegisterIn, TokenOut, UserOut
+import pyotp
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -60,6 +61,14 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
         db.commit()
         log_event(db, "login_failed", user.id)
         raise HTTPException(401, _INVALID)
+
+    if user.totp_enabled:
+        if not body.totp_code or not user.totp_secret:
+            log_event(db, "login_2fa_required", user.id)
+            raise HTTPException(401, "Se requiere código 2FA (TOTP)")
+        if not pyotp.TOTP(user.totp_secret).verify(body.totp_code.strip(), valid_window=1):
+            log_event(db, "login_2fa_failed", user.id)
+            raise HTTPException(401, "Código 2FA (TOTP) inválido")
 
     user.failed_attempts = 0
     user.locked_until = None

@@ -39,9 +39,22 @@ class Settings(BaseSettings):
     max_failed_logins: int = 5
     lockout_minutes: int = 15
     order_max_age_seconds: int = 120
+    rate_limit_per_minute: int = 120
+    cors_origins: str = "http://localhost,http://127.0.0.1"
 
     # Límite diario de transferencias banco -> wallet por cuenta (B5), en centavos.
     bank_transfer_daily_limit_cents: int = 1_000_000
+
+     # Saldo de demostración con el que se abre una cuenta nueva del Banco simulado.
+    bank_open_account_balance_cents: int = 500_000
+
+    # Vigencia con la que la Wallet acepta un comprobante de recarga firmado por el Banco.
+    # Es más larga que `order_max_age_seconds` porque la recarga ya descontó el dinero y no
+    # debe perderse si la app tarda en entregar el comprobante. La unicidad la da `transfer_id`.
+    wallet_voucher_max_age_seconds: int = 3600
+
+    # Clave del administrador de la Tienda (cabecera X-Admin-Key). Vacía = administración deshabilitada.
+    store_admin_key: str = ""
 
 
 settings = Settings()
