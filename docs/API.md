@@ -3,8 +3,9 @@
 La referencia completa y siempre actualizada está en `/docs` de cada servicio (OpenAPI). Si cambias un endpoint, actualiza esta tabla en el mismo PR.
 
 ## Wallet — `:8001`
+
 | Método | Ruta | Auth | Descripción |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | POST | `/auth/register` | — | Registro (contraseña ≥ 10, letras y números) |
 | POST | `/auth/login` | — | Devuelve JWT. 401 credenciales, 423 cuenta bloqueada |
 | GET | `/auth/me` | JWT | Perfil |
@@ -25,7 +26,7 @@ indicada. Los tokens del Banco son JWT propios con `aud="bank"`, distintos de lo
 la Wallet, y se envían como `Authorization: Bearer <token>`.
 
 | Método | Ruta | Auth | Descripción |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | GET | `/promotions` | — | Bonos y promociones activas |
 | GET | `/bank/public-key` | — | Clave pública Ed25519 del Banco |
 | POST | `/transactions/process` | `X-API-Key` + mTLS | Procesa orden firmada → `{receipt, signature}`. Requiere certificado de cliente TLS emitido por la CA interna (`CN=store`). 400 firma/expirada, 402 fondos, 403 cuenta congelada, 404 sin cuenta, 409 repetida. Cada cargo deja un `Movement`. Si hay canje pendiente, aplica el descuento y el recibo incluye `discount_cents`, `charged_cents` y `promotion_id` (`amount_cents` no cambia) |
@@ -69,39 +70,43 @@ Para obtener un token de administrador en desarrollo: `python scripts/bank_admin
 La comunicación interservicio entre la Tienda y el Banco (`POST /transactions/process`) está protegida por TLS Mutuo (mTLS), además de la cabecera `X-API-Key`.
 
 1. **Generación de certificados:**
+
    ```bash
    # En Linux / Mac / Git Bash:
    bash scripts/make_certs.sh
    # O en Windows / cualquier entorno con Python:
    python scripts/make_certs.py
    ```
+
    Crea la CA interna y los certificados en `backend/certs/` (`ca.pem`, `bank.pem`, `bank.key`, `store.pem`, `store.key`).
 
 2. **Arranque del Banco con mTLS:**
+
    ```bash
    uvicorn bank_service.main:app --port 8002 --ssl-keyfile certs/bank.key --ssl-certfile certs/bank.pem --ssl-ca-certs certs/ca.pem --ssl-cert-reqs 2
    ```
 
 3. **Demostración de seguridad (Prueba de handshake):**
    - **Petición rechazada sin certificado de cliente:**
+
      ```bash
      curl https://localhost:8002/bank/public-key --cacert certs/ca.pem
      # Error esperado: el handshake TLS falla (el servidor Banco exige certificado de cliente y aborta la conexión).
      ```
+
    - **Petición autorizada con certificado de la Tienda:**
+
      ```bash
      curl https://localhost:8002/bank/public-key --cacert certs/ca.pem --cert certs/store.pem --key certs/store.key
      # Respuesta 200 OK con la clave pública Ed25519 del Banco.
      ```
-
-
 
 ## Tienda — `:8003`
 
 Las rutas de órdenes usan el **JWT de la Wallet** (`Authorization: Bearer ...`): cada usuario solo ve y modifica sus propias órdenes.
 
 | Método | Ruta | Auth | Descripción |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | GET | `/products` | — | Catálogo. Filtros opcionales: `q` (nombre/descripción) y `category`. Cada producto trae `category` |
 | GET | `/products/categories` | — | Lista de categorías |
 | GET | `/products/{id}` | — | Detalle de un producto |

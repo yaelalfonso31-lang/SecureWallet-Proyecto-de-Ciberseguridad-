@@ -59,6 +59,9 @@ class WalletTransaction {
     required this.subtitle,
     required this.amountCents,
     required this.date,
+    type,
+    required String counterparty,
+    required DateTime createdAt,
   });
 
   final String id;
@@ -92,7 +95,8 @@ const List<BankAccountInfo> demoBankAccounts = [
 ];
 
 class UserProfile {
-  const UserProfile({required this.id, required this.email, required this.fullName});
+  const UserProfile(
+      {required this.id, required this.email, required this.fullName});
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
         id: json['id'] as String,

@@ -41,6 +41,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     ref.invalidate(cardsProvider);
     ref.invalidate(profileProvider);
     ref.invalidate(walletBalanceProvider);
+    ref.invalidate(walletMovementsProvider);
     ref.invalidate(bankLinkedProvider);
     ref.invalidate(bankAccountProvider);
     ref.invalidate(bankTicketsProvider);
@@ -70,7 +71,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    final wallet = ref.watch(demoWalletProvider);
     final profile = ref.watch(profileProvider);
     final cards = ref.watch(cardsProvider);
     final settings = ref.watch(securitySettingsProvider);
@@ -133,7 +133,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       ),
     ];
 
-    final recent = wallet.transactions.take(4).toList();
+    final movementsAsync = ref.watch(walletMovementsProvider);
 
     return RefreshIndicator(
       color: WalletColors.blue,
@@ -193,7 +193,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   ),
                   const SizedBox(height: 12),
                   BalanceCard(
-                    balanceCents: realBalance ?? wallet.balanceCents,
+                    balanceCents: realBalance ?? 0,
                     hidden: _hidden,
                     onToggle: () => setState(() => _hidden = !_hidden),
                     onSend: () => context.push('/money/send'),
@@ -459,20 +459,80 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: SoftCard(
-              padding: EdgeInsets.zero,
-              child: Column(
-                children: [
-                  for (var i = 0; i < recent.length; i++) ...[
-                    if (i > 0) const Divider(height: 1, indent: 72),
-                    TransactionTile(
-                      tx: recent[i],
-                      onTap: () =>
-                          context.push('/transaction', extra: recent[i]),
-                    ),
-                  ],
-                ],
+            child: movementsAsync.when(
+              loading: () => const SoftCard(
+                child: Center(child: CircularProgressIndicator()),
               ),
+              error: (e, _) => const InfoBanner(
+                kind: BannerKind.danger,
+                text: 'No pudimos cargar los movimientos.',
+              ),
+              data: (list) {
+                if (list.isEmpty) {
+                  return const SoftCard(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                        'Aún no tienes movimientos. Recarga desde tu Banco o envía dinero.',
+                        style: WalletText.muted,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  );
+                }
+                final recent = list.take(4).toList();
+                return SoftCard(
+                  padding: EdgeInsets.zero,
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < recent.length; i++) ...[
+                        if (i > 0) const Divider(height: 1, indent: 72),
+                        ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          leading: IconBadge(
+                            recent[i].isCredit
+                                ? Icons.south_west_rounded
+                                : Icons.north_east_rounded,
+                            color: recent[i].isCredit
+                                ? WalletColors.success
+                                : WalletColors.navy,
+                            background: recent[i].isCredit
+                                ? const Color(0xFFE6F6EF)
+                                : WalletColors.yellowSoft,
+                          ),
+                          title: Text(
+                            recent[i].concept,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                              color: WalletColors.ink,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '${formatDate(recent[i].createdAt.toLocal())} · Saldo ${formatMoney(recent[i].balanceAfterCents)}',
+                            style: WalletText.muted,
+                          ),
+                          trailing: Text(
+                            '${recent[i].isCredit ? '+' : '-'}${formatMoney(recent[i].amountCents)}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                              color: recent[i].isCredit
+                                  ? WalletColors.success
+                                  : WalletColors.ink,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
             ),
           ),
           const SizedBox(height: 28),
