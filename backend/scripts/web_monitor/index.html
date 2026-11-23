@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SecureWallet · Inspector Criptográfico en Vivo</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="/static/styles.css" />
+</head>
+
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-icon"><i class="bi bi-shield-lock-fill"></i></div>
+            <div>
+                <h1>SecureWallet · Inspector Criptográfico</h1>
+                <p>Monitoreo en tiempo real de bases de datos, llaves, cifrado y firmas digitales</p>
+            </div>
+        </div>
+
+        <div class="topbar-actions">
+            <div id="liveBadge" class="live-badge active">
+                <span class="pulse-dot"></span>
+                <span id="liveText">EN VIVO · 1.5s</span>
+            </div>
+            <button id="togglePollBtn" class="btn btn-outline" type="button">
+                <i class="bi bi-pause-fill"></i> Pausar
+            </button>
+            <button id="keysBtn" class="btn btn-gold" type="button">
+                <i class="bi bi-key-fill"></i> Ver Llaves Públicas
+            </button>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 4 Pilares Criptográficos -->
+        <section class="pillars-grid">
+            <article class="pillar-card" data-pillar="symmetric">
+                <div class="pillar-header">
+                    <span class="pillar-icon blue"><i class="bi bi-file-earmark-lock2-fill"></i></span>
+                    <div>
+                        <span class="pillar-tag">1. Cifrado Simétrico</span>
+                        <h2>AES-256-GCM + AAD</h2>
+                    </div>
+                </div>
+                <p>Cifra el PAN de tarjetas en reposo con <strong>Nonce aleatorio de 12 bytes</strong> y <strong>AAD
+                        ligado al usuario</strong>. Nunca guarda CVV.</p>
+                <div class="pillar-metric" id="metricSymmetric">0 tarjetas cifradas</div>
+            </article>
+
+            <article class="pillar-card" data-pillar="asymmetric">
+                <div class="pillar-header">
+                    <span class="pillar-icon navy"><i class="bi bi-diagram-3-fill"></i></span>
+                    <div>
+                        <span class="pillar-tag">2. Cifrado Asimétrico</span>
+                        <h2>Curva Ed25519 + mTLS</h2>
+                    </div>
+                </div>
+                <p>Pares de llaves independientes para <strong>Wallet</strong> y <strong>Banco</strong>. Ningún servicio
+                    conoce la llave privada del otro.</p>
+                <div class="pillar-metric" id="metricAsymmetric">Llaves Ed25519 activas</div>
+            </article>
+
+            <article class="pillar-card" data-pillar="hashing">
+                <div class="pillar-header">
+                    <span class="pillar-icon green"><i class="bi bi-hash"></i></span>
+                    <div>
+                        <span class="pillar-tag">3. Funciones Hash</span>
+                        <h2>Argon2id &amp; SHA-256</h2>
+                    </div>
+                </div>
+                <p>Contraseñas con <strong>Argon2id</strong>, retos <strong>OAuth2 PKCE (S256)</strong> y bitácora
+                    inmutable encadenada con <strong>SHA-256</strong>.</p>
+                <div class="pillar-metric" id="metricHashing">Cadena SHA-256 íntegra</div>
+            </article>
+
+            <article class="pillar-card" data-pillar="signatures">
+                <div class="pillar-header">
+                    <span class="pillar-icon gold"><i class="bi bi-patch-check-fill"></i></span>
+                    <div>
+                        <span class="pillar-tag">4. Firma Digital</span>
+                        <h2>No Repudio JSON Canónico</h2>
+                    </div>
+                </div>
+                <p>Autenticidad e integridad en <strong>tickets prepagados</strong>, órdenes de pago y <strong>recibos
+                        bancarios</strong> sobre JSON canónico.</p>
+                <div class="pillar-metric" id="metricSignatures">0 tickets · 0 recibos</div>
+            </article>
+        </section>
+
+        <!-- 3 Microservicios en Tiempo Real -->
+        <section class="services-grid">
+            <!-- COLUMNA 1: WALLET -->
+            <div class="service-column">
+                <div class="service-header wallet-bg">
+                    <div>
+                        <span class="port-badge">:8001 · wallet.db</span>
+                        <h2><i class="bi bi-wallet2"></i> Servicio Wallet</h2>
+                    </div>
+                    <span class="count-pill" id="walletBalancePill">$0.00 MXN</span>
+                </div>
+
+                <div class="card-block">
+                    <h3><i class="bi bi-person-lock"></i> Usuarios (Hash Argon2id + 2FA TOTP)</h3>
+                    <div id="usersList" class="records-list"></div>
+                </div>
+
+                <div class="card-block">
+                    <h3><i class="bi bi-credit-card-2-front"></i> Tarjetas Tokenizadas (AES-256-GCM)</h3>
+                    <div id="cardsList" class="records-list"></div>
+                </div>
+
+                <div class="card-block">
+                    <div class="block-title-row">
+                        <h3><i class="bi bi-link-45deg"></i> Bitácora Inmutable (audit_log)</h3>
+                        <div id="auditControls"></div>
+                    </div>
+                    <div id="chainStatusBanner" class="chain-banner valid"></div>
+                    <div id="auditList" class="records-list"></div>
+                </div>
+            </div>
+
+            <!-- COLUMNA 2: BANCO -->
+            <div class="service-column">
+                <div class="service-header bank-bg">
+                    <div>
+                        <span class="port-badge">:8002 · bank.db</span>
+                        <h2><i class="bi bi-bank2"></i> Servicio Banco</h2>
+                    </div>
+                    <span class="count-pill" id="bankBalancePill">$0.00 MXN</span>
+                </div>
+
+                <div class="card-block">
+                    <h3><i class="bi bi-safe2"></i> Cuentas Bancarias</h3>
+                    <div id="bankAccountsList" class="records-list"></div>
+                </div>
+
+                <div class="card-block">
+                    <h3><i class="bi bi-shield-check"></i> Códigos OAuth2 + PKCE (SHA-256)</h3>
+                    <div id="oauthList" class="records-list"></div>
+                </div>
+
+                <div class="card-block">
+                    <h3><i class="bi bi-ticket-perforated-fill"></i> Tickets Electrónicos (Firmados Ed25519)</h3>
+                    <div id="ticketsList" class="records-list"></div>
+                </div>
+            </div>
+
+            <!-- COLUMNA 3: TIENDA -->
+            <div class="service-column">
+                <div class="service-header store-bg">
+                    <div>
+                        <span class="port-badge">:8003 · store.db</span>
+                        <h2><i class="bi bi-shop"></i> Servicio Tienda</h2>
+                    </div>
+                    <span class="count-pill" id="ordersCountPill">0 órdenes</span>
+                </div>
+
+                <div class="card-block">
+                    <h3><i class="bi bi-receipt"></i> Órdenes y Recibos Firmados</h3>
+                    <div id="ordersList" class="records-list"></div>
+                </div>
+
+                <div class="card-block">
+                    <h3><i class="bi bi-shield-exclamation"></i> Tickets Gastados (Anti-Doble Gasto)</h3>
+                    <div id="spentTicketsList" class="records-list"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal Inspector Criptográfico -->
+    <div id="inspectorModal" class="modal-backdrop hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="modalTitle">Detalle Criptográfico</h3>
+                <button id="closeModalBtn" class="btn-icon" type="button"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <div id="modalBody" class="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>
