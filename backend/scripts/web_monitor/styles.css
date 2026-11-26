@@ -148,6 +148,14 @@ body {
     color: var(--navy);
 }
 
+.btn-danger-lg {
+    background: var(--danger);
+    color: #fff;
+    padding: 10px 18px;
+    font-size: 0.86rem;
+    width: 100%;
+}
+
 .btn-attack {
     background: var(--navy);
     color: #fff;
@@ -287,8 +295,13 @@ body {
     box-shadow: 0 4px 16px rgba(11, 42, 107, 0.06);
 }
 
-.lab-header {
-    margin-bottom: 14px;
+.lab-top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 16px;
 }
 
 .lab-kicker {
@@ -301,18 +314,269 @@ body {
     gap: 6px;
 }
 
-.lab-header h2 {
+.lab-top-bar h2 {
     font-size: 1.15rem;
     font-weight: 900;
     color: var(--navy);
     margin: 2px 0 4px;
 }
 
-.lab-header p {
+.lab-top-bar p {
     font-size: 0.84rem;
     color: var(--muted);
 }
 
+.lab-tabs {
+    display: flex;
+    gap: 8px;
+    background: var(--ice);
+    padding: 5px;
+    border-radius: 12px;
+}
+
+.tab-btn {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 800;
+    font-size: 0.82rem;
+    padding: 8px 14px;
+    border-radius: 9px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tab-btn.active {
+    background: var(--navy);
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(11, 42, 107, 0.2);
+}
+
+/* Constructor Personalizado */
+.custom-builder {
+    background: #f8faff;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px;
+}
+
+.builder-form-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 1.6fr 0.8fr;
+    gap: 14px;
+    align-items: end;
+}
+
+@media (max-width: 1100px) {
+    .builder-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.dynamic-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.form-group label {
+    font-size: 0.77rem;
+    font-weight: 800;
+    color: var(--navy);
+}
+
+.form-control {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid #c5d2ea;
+    border-radius: 10px;
+    background: #fff;
+    color: var(--ink);
+    font-size: 0.84rem;
+    font-weight: 600;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(27, 95, 208, 0.14);
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Sub-tabs internos de Ataques Personalizados */
+.inner-tabs {
+    display: inline-flex;
+    gap: 6px;
+    background: var(--ice);
+    padding: 4px;
+    border-radius: 10px;
+    margin-bottom: 14px;
+}
+
+.inner-tab-btn {
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 800;
+    font-size: 0.78rem;
+    padding: 7px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.inner-tab-btn.active {
+    background: #fff;
+    color: var(--navy);
+    box-shadow: 0 2px 6px rgba(11, 42, 107, 0.12);
+}
+
+/* Editor Manual de Registros Reales */
+.manual-editor {
+    background: #fffdf5;
+    border: 1px solid #f0e2a8;
+    border-radius: 14px;
+    padding: 16px;
+}
+
+.manual-editor-intro {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 14px;
+    line-height: 1.5;
+}
+
+.manual-editor-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr 0.8fr;
+    gap: 14px;
+    align-items: end;
+    margin-bottom: 14px;
+}
+
+@media (max-width: 1000px) {
+    .manual-editor-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.btn-outline-navy {
+    background: #fff;
+    color: var(--navy);
+    border: 1.5px solid var(--navy);
+    width: 100%;
+}
+
+.btn-gold-lg {
+    background: var(--gold);
+    color: var(--navy);
+    padding: 10px 18px;
+    font-size: 0.86rem;
+}
+
+.manual-fields-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.manual-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px;
+}
+
+.manual-field label {
+    font-size: 0.74rem;
+    font-weight: 800;
+    color: var(--navy);
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.manual-field .original-value {
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 0.68rem;
+    text-transform: none;
+}
+
+.manual-field textarea,
+.manual-field input {
+    width: 100%;
+    font-family: Consolas, monospace;
+    font-size: 0.78rem;
+    padding: 7px 9px;
+    border: 1px solid #c5d2ea;
+    border-radius: 8px;
+    resize: vertical;
+    min-height: 38px;
+    background: #fbfcff;
+    color: var(--ink);
+}
+
+.manual-field textarea:focus,
+.manual-field input:focus {
+    outline: none;
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(27, 95, 208, 0.14);
+}
+
+.manual-field.dirty {
+    border-color: var(--gold);
+    background: var(--gold-soft);
+}
+
+.manual-password-field {
+    margin-bottom: 14px;
+}
+
+.manual-status-line {
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+    min-height: 18px;
+}
+
+.manual-status-line.ok {
+    color: var(--success);
+}
+
+.manual-status-line.error {
+    color: var(--danger);
+}
+
+.manual-editor-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.manual-editor-actions .btn {
+    flex: 1 1 220px;
+}
+
+
+/* Ataques rápidos */
 .attacks-grid {
     display: grid;
     grid-template-columns: repeat(6, 1fr);
@@ -367,16 +631,13 @@ body {
     margin-bottom: 4px;
 }
 
+/* Panel de Resultado y Diagnóstico de Defensa */
 .attack-result {
     margin-top: 16px;
     border-radius: 14px;
     border: 1px solid var(--line);
     background: #f8faff;
     padding: 16px;
-}
-
-.attack-result.hidden {
-    display: none;
 }
 
 .result-banner {
@@ -387,9 +648,9 @@ body {
     gap: 10px;
     padding: 10px 14px;
     border-radius: 10px;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
     font-weight: 800;
-    font-size: 0.88rem;
+    font-size: 0.9rem;
 }
 
 .result-banner.blocked {
@@ -406,8 +667,8 @@ body {
 
 .result-grid {
     display: grid;
-    grid-template-columns: 1.15fr 1fr;
-    gap: 14px;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 16px;
 }
 
 @media (max-width: 980px) {
@@ -432,6 +693,46 @@ body {
     font-size: 0.82rem;
 }
 
+.defense-card {
+    background: #fff;
+    border: 1px solid #b2f2bb;
+    border-left: 5px solid var(--success);
+    border-radius: 12px;
+    padding: 14px;
+}
+
+.defense-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 900;
+    color: var(--success);
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+}
+
+.defense-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.defense-pill {
+    font-size: 0.72rem;
+    font-weight: 700;
+    background: var(--ice);
+    color: var(--navy);
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-family: Consolas, monospace;
+}
+
+.defense-card p {
+    font-size: 0.82rem;
+    color: var(--ink);
+}
+
 .payload-stack {
     display: flex;
     flex-direction: column;
@@ -452,7 +753,7 @@ pre.json-box {
     border-radius: 10px;
     font-family: Consolas, monospace;
     font-size: 0.74rem;
-    max-height: 155px;
+    max-height: 165px;
     overflow: auto;
     white-space: pre-wrap;
     word-break: break-all;
@@ -692,10 +993,6 @@ pre.json-box {
     place-items: center;
     padding: 20px;
     z-index: 100;
-}
-
-.modal-backdrop.hidden {
-    display: none;
 }
 
 .modal-card {
