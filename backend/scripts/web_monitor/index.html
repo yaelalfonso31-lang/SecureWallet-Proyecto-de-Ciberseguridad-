@@ -15,7 +15,8 @@
             <div class="brand-icon"><i class="bi bi-shield-lock-fill"></i></div>
             <div>
                 <h1>SecureWallet · Inspector Criptográfico &amp; Lab de Seguridad</h1>
-                <p>Monitoreo en vivo de bases de datos, llaves, cifrado, firmas digitales y pruebas de ataque STRIDE</p>
+                <p>Monitoreo en vivo de bases de datos, llaves, cifrado, firmas digitales y pruebas de ataque
+                    personalizadas</p>
             </div>
         </div>
 
@@ -91,17 +92,127 @@
 
         <!-- LABORATORIO DE ATAQUES EN VIVO -->
         <section class="attack-lab">
-            <div class="lab-header">
+            <div class="lab-top-bar">
                 <div>
                     <span class="lab-kicker"><i class="bi bi-bug-fill"></i> PRUEBAS DE PENETRACIÓN EN VIVO (MODELO
                         STRIDE)</span>
                     <h2>Laboratorio de Simulación de Ataques</h2>
-                    <p>Ejecuta ataques reales contra los microservicios activos para demostrar cómo cada mecanismo
-                        criptográfico los neutraliza y actualiza las bases de datos.</p>
+                    <p>Ataca registros reales de tus bases de datos (usuarios, tarjetas, tickets u órdenes) o lanza
+                        escenarios automáticos.</p>
+                </div>
+
+                <div class="lab-tabs">
+                    <button id="tabCustomBtn" class="tab-btn active" type="button">
+                        <i class="bi bi-sliders"></i> Ataques Personalizados (BD Real)
+                    </button>
+                    <button id="tabPresetBtn" class="tab-btn" type="button">
+                        <i class="bi bi-lightning-charge-fill"></i> Ataques Rápidos (1 Clic)
+                    </button>
                 </div>
             </div>
 
-            <div class="attacks-grid">
+            <!-- TAB 1: CONSTRUCTOR DE ATAQUES PERSONALIZADOS CON DATOS REALES -->
+            <div id="customAttackView" class="custom-builder">
+
+                <!-- SUB-TABS: vectores guiados vs edición manual de registros reales -->
+                <div class="inner-tabs">
+                    <button id="innerTabGuided" class="inner-tab-btn active" type="button">
+                        <i class="bi bi-magic"></i> Vectores Guiados
+                    </button>
+                    <button id="innerTabManual" class="inner-tab-btn" type="button">
+                        <i class="bi bi-pencil-square"></i> Editor Manual de Registros (BD Real)
+                    </button>
+                </div>
+
+                <!-- SUB-VISTA 1: constructor guiado (ya existente) -->
+                <div id="guidedAttackView" class="guided-attack-view">
+                    <div class="builder-form-grid">
+                        <div class="form-group">
+                            <label for="customAttackType"><i class="bi bi-crosshair"></i> 1. Elige el vector de
+                                ataque</label>
+                            <select id="customAttackType" class="form-control">
+                                <option value="custom_ticket_tamper">Manipular Ticket Real de bank.db (Alterar monto
+                                    Ed25519)</option>
+                                <option value="custom_ticket_replay">Reutilizar Ticket Real de bank.db (Doble Gasto)
+                                </option>
+                                <option value="custom_aes_gcm_tamper">Atacar Tarjeta Real de wallet.db (AES-256-GCM /
+                                    Sustitución AAD)</option>
+                                <option value="custom_order_tamper">Alterar Orden Real de store.db (Tampering de Pago)
+                                </option>
+                                <option value="custom_idor_attack">Ataque IDOR entre dos Usuarios Reales (Acceso
+                                    Cruzado)
+                                </option>
+                                <option value="custom_bruteforce_user">Fuerza Bruta contra Usuario Real de wallet.db
+                                    (Lockout 423)</option>
+                            </select>
+                        </div>
+
+                        <!-- Campos dinámicos según el vector seleccionado -->
+                        <div id="customDynamicFields" class="dynamic-fields"></div>
+
+                        <div class="form-group submit-col">
+                            <label>&nbsp;</label>
+                            <button id="runCustomAttackBtn" class="btn btn-danger-lg" type="button">
+                                <i class="bi bi-shield-slash-fill"></i> Ejecutar Ataque Personalizado
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUB-VISTA 2: editor manual de registros reales (NUEVO) -->
+                <div id="manualEditorView" class="manual-editor hidden">
+                    <p class="manual-editor-intro">
+                        Elige un registro real, edita cualquiera de sus campos y guárdalo directamente en el
+                        <code>.db</code> correspondiente. Después ejecuta la prueba para ver si el sistema detecta tu
+                        manipulación y qué mecanismo exacto la defiende.
+                    </p>
+
+                    <div class="manual-editor-grid">
+                        <div class="form-group">
+                            <label for="manualEntityType"><i class="bi bi-database"></i> 1. Tipo de registro</label>
+                            <select id="manualEntityType" class="form-control">
+                                <option value="card">Tarjeta (wallet.db → cards)</option>
+                                <option value="ticket">Ticket Bancario (bank.db → bank_tickets)</option>
+                                <option value="user">Usuario (wallet.db → users)</option>
+                                <option value="order">Orden (store.db → orders)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="manualRecordId"><i class="bi bi-list-ul"></i> 2. Registro real</label>
+                            <select id="manualRecordId" class="form-control"></select>
+                        </div>
+                        <div class="form-group submit-col">
+                            <label>&nbsp;</label>
+                            <button id="manualLoadBtn" class="btn btn-outline-navy" type="button">
+                                <i class="bi bi-cloud-download-fill"></i> Cargar Registro Real
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="manualFieldsContainer" class="manual-fields-container"></div>
+
+                    <div id="manualTestPasswordWrap" class="form-group hidden manual-password-field">
+                        <label for="manualTestPassword"><i class="bi bi-key"></i> Contraseña de prueba para el
+                            login</label>
+                        <input id="manualTestPassword" type="text" class="form-control"
+                            placeholder="Escribe una contraseña para probar el login real" />
+                    </div>
+
+                    <div id="manualStatusLine" class="manual-status-line"></div>
+
+                    <div class="manual-editor-actions">
+                        <button id="manualSaveBtn" class="btn btn-gold-lg" type="button" disabled>
+                            <i class="bi bi-save-fill"></i> Guardar Cambios en la BD Real
+                        </button>
+                        <button id="manualExecuteBtn" class="btn btn-danger-lg" type="button" disabled>
+                            <i class="bi bi-shield-slash-fill"></i> Ejecutar Ataque con Este Registro
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: ATAQUES PREDETERMINADOS -->
+            <div id="presetAttackView" class="attacks-grid hidden">
                 <div class="attack-card">
                     <div class="attack-top">
                         <span class="badge badge-red">Tampering</span>
@@ -180,7 +291,7 @@
                 </div>
             </div>
 
-            <!-- Panel de Resultado del Ataque -->
+            <!-- Panel de Resultado y Explicación del Mecanismo Defensor -->
             <div id="attackResultPanel" class="attack-result hidden"></div>
         </section>
 

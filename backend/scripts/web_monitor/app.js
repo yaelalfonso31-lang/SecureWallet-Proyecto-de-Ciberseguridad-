@@ -1,5 +1,6 @@
 let polling = true;
-let lastKeysData = null;
+let latestSnapshot = null;
+let lastOptionsSignature = "";
 const seenFingerprints = new Map();
 
 function money(cents) {
@@ -57,96 +58,538 @@ document.getElementById("togglePollBtn").addEventListener("click", () => {
 });
 
 document.getElementById("keysBtn").addEventListener("click", () => {
-  if (!lastKeysData) return;
+  if (!latestSnapshot) return;
+  const keys = latestSnapshot.keys;
   openModal("Gestión de Llaves Criptográficas (Zero-Trust)", `
     <div class="explain-box">
       Cada servicio mantiene sus llaves privadas aisladas en variables de entorno (<code>.env</code>). Las bases de datos nunca almacenan llaves privadas ni contraseñas en claro.
     </div>
     <p style="margin-top:12px;"><strong>Huella SHA-256 de Llave Simétrica AES-256-GCM (<code>DATA_ENCRYPTION_KEY</code>):</strong></p>
-    <div class="detail-box">${escapeHtml(lastKeysData.aes_key_fingerprint)} (32 bytes / 256 bits)</div>
+    <div class="detail-box">${escapeHtml(keys.aes_key_fingerprint)} (32 bytes / 256 bits)</div>
 
     <p><strong>Llave Pública Ed25519 de la Wallet (<code>WALLET_SIGNING_PUBLIC_KEY</code>):</strong></p>
-    <div class="detail-box">${escapeHtml(lastKeysData.wallet_public_key || "No configurada")}</div>
+    <div class="detail-box">${escapeHtml(keys.wallet_public_key || "No configurada")}</div>
 
     <p><strong>Llave Pública Ed25519 del Banco (<code>BANK_SIGNING_PUBLIC_KEY</code>):</strong></p>
-    <div class="detail-box">${escapeHtml(lastKeysData.bank_public_key || "No configurada")}</div>
+    <div class="detail-box">${escapeHtml(keys.bank_public_key || "No configurada")}</div>
 
     <p><strong>Certificados mTLS (Tienda ↔ Banco):</strong>
-      <span class="badge ${lastKeysData.mtls_configured ? "badge-green" : "badge-gold"}">
-        ${lastKeysData.mtls_configured ? "CA + Certificados X.509 listos" : "Pendiente ejecutar make_certs.py"}
+      <span class="badge ${keys.mtls_configured ? "badge-green" : "badge-gold"}">
+        ${keys.mtls_configured ? "CA + Certificados X.509 listos" : "Pendiente ejecutar make_certs.py"}
       </span>
     </p>
   `);
 });
 
-// ================= LABORATORIO DE ATAQUES EN VIVO =================
+// ================= TABS DE LABORATORIO =================
 
-async function runAttack(attackId, btnEl) {
+const tabCustomBtn = document.getElementById("tabCustomBtn");
+const tabPresetBtn = document.getElementById("tabPresetBtn");
+const customAttackView = document.getElementById("customAttackView");
+const presetAttackView = document.getElementById("presetAttackView");
+
+tabCustomBtn.addEventListener("click", () => {
+  tabCustomBtn.classList.add("active");
+  tabPresetBtn.classList.remove("active");
+  customAttackView.classList.remove("hidden");
+  presetAttackView.classList.add("hidden");
+});
+
+tabPresetBtn.addEventListener("click", () => {
+  tabPresetBtn.classList.add("active");
+  tabCustomBtn.classList.remove("active");
+  presetAttackView.classList.remove("hidden");
+  customAttackView.classList.add("hidden");
+});
+
+// ================= CONSTRUCTOR DE ATAQUES PERSONALIZADOS =================
+
+function buildSelectOptions(items, mapFn, emptyLabel) {
+  if (!items || !items.length) {
+    return `<option value="">${escapeHtml(emptyLabel)}</option>`;
+  }
+  return items.map(mapFn).join("");
+}
+
+function renderCustomFields(forceReset = false) {
+  const container = document.getElementById("customDynamicFields");
+  const attackType = document.getElementById("customAttackType").value;
+  const users = latestSnapshot?.wallet?.users || [];
+  const cards = latestSnapshot?.wallet?.cards || [];
+  const tickets = latestSnapshot?.bank?.tickets || [];
+  const orders = latestSnapshot?.store?.orders || [];
+
+  const signature = JSON.stringify({
+    attackType,
+    u: users.map((x) => x.id),
+    c: cards.map((x) => x.id),
+    t: tickets.map((x) => `${x.ticket_id}:${x.status}`),
+    o: orders.map((x) => `${x.order_id}:${x.status}`),
+  });
+
+  if (!forceReset && signature === lastOptionsSignature) {
+    return;
+  }
+
+  // Preservar valores seleccionados si el usuario ya eligió algo
+  const prevValues = {};
+  container.querySelectorAll("select, input").forEach((el) => {
+    prevValues[el.id] = el.value;
+  });
+  lastOptionsSignature = signature;
+
+  const userOptions = buildSelectOptions(
+    users,
+    (u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.email)} (${escapeHtml(u.id.slice(0, 8))}…)</option>`,
+    "No hay usuarios en wallet.db (registra uno en la app)"
+  );
+
+  const cardOptions = buildSelectOptions(
+    cards,
+    (c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.brand.toUpperCase())} •••• ${escapeHtml(c.last4)} (${escapeHtml(c.holder_name)})</option>`,
+    "No hay tarjetas en wallet.db (agrega una en la app)"
+  );
+
+  const ticketOptions = buildSelectOptions(
+    tickets,
+    (t) => `<option value="${escapeHtml(t.ticket_id)}">${escapeHtml(t.ticket_id)} · ${money(t.amount_cents)} [${escapeHtml(t.status.toUpperCase())}]</option>`,
+    "No hay tickets en bank.db (compra uno en Banco)"
+  );
+
+  const orderOptions = buildSelectOptions(
+    orders,
+    (o) => `<option value="${escapeHtml(o.order_id)}">${escapeHtml(o.order_id)} · ${money(o.total_cents)} [${escapeHtml(o.status.toUpperCase())}]</option>`,
+    "No hay órdenes en store.db (se creará una automática)"
+  );
+
+  if (attackType === "custom_ticket_tamper") {
+    container.innerHTML = `
+      <div class="form-group">
+        <label for="fieldTicketId">2. Ticket real en bank.db</label>
+        <select id="fieldTicketId" class="form-control">${ticketOptions}</select>
+      </div>
+      <div class="form-group">
+        <label for="fieldTamperedAmount">3. Monto falso inyectado (MXN)</label>
+        <select id="fieldTamperedAmount" class="form-control">
+          <option value="50000">$500.00 MXN (50,000 centavos)</option>
+          <option value="20000">$200.00 MXN (20,000 centavos)</option>
+          <option value="99900">$999.00 MXN (Denominación ilegal)</option>
+        </select>
+      </div>
+    `;
+  } else if (attackType === "custom_ticket_replay") {
+    container.innerHTML = `
+      <div class="form-group">
+        <label for="fieldTicketId">2. Ticket real a reutilizar (bank.db)</label>
+        <select id="fieldTicketId" class="form-control">${ticketOptions}</select>
+      </div>
+      <div class="form-group">
+        <label for="fieldOrderId">3. Orden destino en store.db (opcional)</label>
+        <select id="fieldOrderId" class="form-control">
+          <option value="">Crear orden nueva automáticamente</option>
+          ${orders.length ? orderOptions : ""}
+        </select>
+      </div>
+    `;
+  } else if (attackType === "custom_aes_gcm_tamper") {
+    container.innerHTML = `
+      <div class="form-group">
+        <label for="fieldCardId">2. Tarjeta cifrada real (wallet.db)</label>
+        <select id="fieldCardId" class="form-control">${cardOptions}</select>
+      </div>
+      <div class="form-group">
+        <label for="fieldMode">3. Técnica de ataque simétrico</label>
+        <select id="fieldMode" class="form-control">
+          <option value="bitflip">Alterar 1 byte del ciphertext AES-256-GCM</option>
+          <option value="aad_swap">Copiar registro a otro usuario (Sustitución AAD)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="fieldSecondUserId">4. Usuario destino (si usas Sustitución AAD)</label>
+        <select id="fieldSecondUserId" class="form-control">${userOptions}</select>
+      </div>
+    `;
+  } else if (attackType === "custom_order_tamper") {
+    container.innerHTML = `
+      <div class="form-group">
+        <label for="fieldOrderId">2. Orden real en store.db</label>
+        <select id="fieldOrderId" class="form-control">${orderOptions}</select>
+      </div>
+      <div class="form-group">
+        <label for="fieldTamperedAmount">3. Monto alterado por el atacante (MXN)</label>
+        <input id="fieldTamperedAmount" type="number" min="1" value="100" class="form-control" placeholder="Ej. 100 (= $1.00 MXN)" />
+      </div>
+    `;
+  } else if (attackType === "custom_idor_attack") {
+    container.innerHTML = `
+      <div class="form-group">
+        <label for="fieldUserId">2. Usuario Atacante (JWT válido)</label>
+        <select id="fieldUserId" class="form-control">${userOptions}</select>
+      </div>
+      <div class="form-group">
+        <label for="fieldOrderId">3. Orden Víctima (store.db)</label>
+        <select id="fieldOrderId" class="form-control">
+          <option value="">-- Ninguna (usar tarjeta abajo) --</option>
+          ${orders.length ? orderOptions : ""}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="fieldCardId">4. O Tarjeta Víctima (wallet.db)</label>
+        <select id="fieldCardId" class="form-control">
+          <option value="">-- Ninguna (usar orden) --</option>
+          ${cards.length ? cardOptions : ""}
+        </select>
+      </div>
+    `;
+  } else if (attackType === "custom_bruteforce_user") {
+    container.innerHTML = `
+      <div class="form-group">
+        <label for="fieldUserId">2. Usuario objetivo en wallet.db</label>
+        <select id="fieldUserId" class="form-control">${userOptions}</select>
+      </div>
+      <div class="form-group">
+        <label for="fieldMode">3. Intensidad del ataque</label>
+        <select id="fieldMode" class="form-control">
+          <option value="lockout">Ráfaga de 5 intentos fallidos (Activar bloqueo 423)</option>
+          <option value="single">1 intento fallido (Registrar en bitácora SHA-256)</option>
+        </select>
+      </div>
+    `;
+  }
+
+  Object.entries(prevValues).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el && val) el.value = val;
+  });
+}
+
+document.getElementById("customAttackType").addEventListener("change", () => renderCustomFields(true));
+
+// ================= SUB-TABS: GUIADO vs EDITOR MANUAL =================
+
+const innerTabGuided = document.getElementById("innerTabGuided");
+const innerTabManual = document.getElementById("innerTabManual");
+const guidedAttackView = document.getElementById("guidedAttackView");
+const manualEditorView = document.getElementById("manualEditorView");
+
+innerTabGuided.addEventListener("click", () => {
+  innerTabGuided.classList.add("active");
+  innerTabManual.classList.remove("active");
+  guidedAttackView.classList.remove("hidden");
+  manualEditorView.classList.add("hidden");
+});
+
+innerTabManual.addEventListener("click", () => {
+  innerTabManual.classList.add("active");
+  innerTabGuided.classList.remove("active");
+  manualEditorView.classList.remove("hidden");
+  guidedAttackView.classList.add("hidden");
+  renderManualRecordOptions();
+});
+
+// ================= EDITOR MANUAL DE REGISTROS REALES (LEE Y ESCRIBE EN LOS .db) =================
+
+const MANUAL_FIELD_LABELS = {
+  full_name: "Nombre completo",
+  password_hash: "Hash de contraseña (Argon2id)",
+  failed_attempts: "Intentos fallidos",
+  locked_until: "Bloqueada hasta (ISO o vacío)",
+  brand: "Marca de tarjeta",
+  last4: "Últimos 4 dígitos",
+  holder_name: "Nombre del titular",
+  pan_encrypted: "PAN cifrado (AES-256-GCM, Base64URL)",
+  ticket_json: "JSON del ticket (monto, nonce, etc.)",
+  signature: "Firma Ed25519 (Base64)",
+  status: "Estado",
+  subtotal_cents: "Subtotal (centavos)",
+  discount_cents: "Descuento (centavos)",
+  total_cents: "Total (centavos)",
+};
+
+let manualCurrentRecord = null; // { entity, pk, editable_fields, record }
+
+function manualSetStatus(message, kind) {
+  const el = document.getElementById("manualStatusLine");
+  el.textContent = message || "";
+  el.className = `manual-status-line ${kind || ""}`;
+}
+
+function manualResetEditor() {
+  manualCurrentRecord = null;
+  document.getElementById("manualFieldsContainer").innerHTML = "";
+  document.getElementById("manualSaveBtn").disabled = true;
+  document.getElementById("manualExecuteBtn").disabled = true;
+  document.getElementById("manualTestPasswordWrap").classList.add("hidden");
+  manualSetStatus("", "");
+}
+
+function renderManualRecordOptions() {
+  const entity = document.getElementById("manualEntityType").value;
+  const select = document.getElementById("manualRecordId");
+  const users = latestSnapshot?.wallet?.users || [];
+  const cards = latestSnapshot?.wallet?.cards || [];
+  const tickets = latestSnapshot?.bank?.tickets || [];
+  const orders = latestSnapshot?.store?.orders || [];
+
+  let options = "";
+  if (entity === "card") {
+    options = buildSelectOptions(
+      cards,
+      (c) => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.brand.toUpperCase())} •••• ${escapeHtml(c.last4)} (${escapeHtml(c.holder_name)})</option>`,
+      "No hay tarjetas en wallet.db"
+    );
+  } else if (entity === "ticket") {
+    options = buildSelectOptions(
+      tickets,
+      (t) => `<option value="${escapeHtml(t.ticket_id)}">${escapeHtml(t.ticket_id)} · ${money(t.amount_cents)} [${escapeHtml(t.status.toUpperCase())}]</option>`,
+      "No hay tickets en bank.db"
+    );
+  } else if (entity === "user") {
+    options = buildSelectOptions(
+      users,
+      (u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.email)} (${escapeHtml(u.id.slice(0, 8))}…)</option>`,
+      "No hay usuarios en wallet.db"
+    );
+  } else if (entity === "order") {
+    options = buildSelectOptions(
+      orders,
+      (o) => `<option value="${escapeHtml(o.order_id)}">${escapeHtml(o.order_id)} · ${money(o.total_cents)} [${escapeHtml(o.status.toUpperCase())}]</option>`,
+      "No hay órdenes en store.db"
+    );
+  }
+  select.innerHTML = options;
+  manualResetEditor();
+}
+
+document.getElementById("manualEntityType").addEventListener("change", renderManualRecordOptions);
+
+document.getElementById("manualLoadBtn").addEventListener("click", async () => {
+  const entity = document.getElementById("manualEntityType").value;
+  const recordId = document.getElementById("manualRecordId").value;
+  if (!recordId) {
+    manualSetStatus("Selecciona primero un registro real de la lista.", "error");
+    return;
+  }
+
+  manualSetStatus("Cargando registro real...", "");
+  try {
+    const res = await fetch(`/api/record/${entity}/${encodeURIComponent(recordId)}`);
+    const data = await res.json();
+    if (!res.ok) {
+      manualSetStatus(data.detail || "No se pudo cargar el registro.", "error");
+      return;
+    }
+
+    manualCurrentRecord = data;
+    const container = document.getElementById("manualFieldsContainer");
+    container.innerHTML = data.editable_fields.map((field) => {
+      const value = data.record[field] ?? "";
+      const label = MANUAL_FIELD_LABELS[field] || field;
+      const long = typeof value === "string" && value.length > 48;
+      const inputEl = long
+        ? `<textarea class="manual-field-input" data-field="${escapeHtml(field)}" rows="3">${escapeHtml(value)}</textarea>`
+        : `<input class="manual-field-input" data-field="${escapeHtml(field)}" type="text" value="${escapeHtml(value)}" />`;
+      return `
+        <div class="manual-field" data-wrap="${escapeHtml(field)}">
+          <label><span>${escapeHtml(label)}</span><span class="original-value">${escapeHtml(field)}</span></label>
+          ${inputEl}
+        </div>
+      `;
+    }).join("");
+
+    container.querySelectorAll(".manual-field-input").forEach((el) => {
+      const originalVal = String(data.record[el.dataset.field] ?? "");
+      el.addEventListener("input", () => {
+        const wrap = container.querySelector(`[data-wrap="${el.dataset.field}"]`);
+        wrap.classList.toggle("dirty", el.value !== originalVal);
+      });
+    });
+
+    document.getElementById("manualTestPasswordWrap").classList.toggle("hidden", entity !== "user");
+    document.getElementById("manualSaveBtn").disabled = false;
+    document.getElementById("manualExecuteBtn").disabled = false;
+    manualSetStatus("Registro real cargado. Edita los campos y guarda, o ejecuta la prueba directamente.", "ok");
+  } catch (_) {
+    manualSetStatus("Error de red al cargar el registro.", "error");
+  }
+});
+
+document.getElementById("manualSaveBtn").addEventListener("click", async () => {
+  if (!manualCurrentRecord) return;
+  const { entity, pk, record } = manualCurrentRecord;
+  const recordId = record[pk];
+  const container = document.getElementById("manualFieldsContainer");
+  const fields = {};
+  container.querySelectorAll(".manual-field-input").forEach((el) => {
+    fields[el.dataset.field] = el.value;
+  });
+
+  const btn = document.getElementById("manualSaveBtn");
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Escribiendo en BD real...';
+  manualSetStatus("Guardando cambios directamente en el archivo .db...", "");
+
+  try {
+    const res = await fetch(`/api/record/${entity}/${encodeURIComponent(recordId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      manualSetStatus(data.detail || "No se pudo guardar el registro.", "error");
+      return;
+    }
+    manualCurrentRecord.record = data.record;
+    container.querySelectorAll(".manual-field").forEach((wrap) => wrap.classList.remove("dirty"));
+    manualSetStatus(`Guardado en ${manualCurrentRecord.db || "la BD"} real · campos escritos: ${data.fields_written.join(", ")}.`, "ok");
+    await fetchSnapshot();
+  } catch (_) {
+    manualSetStatus("Error de red al guardar el registro.", "error");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
+});
+
+document.getElementById("manualExecuteBtn").addEventListener("click", async () => {
+  if (!manualCurrentRecord) return;
+  const { entity, pk, record } = manualCurrentRecord;
+  const recordId = record[pk];
+  const testPassword = document.getElementById("manualTestPassword").value;
+
+  const btn = document.getElementById("manualExecuteBtn");
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Ejecutando sobre BD real...';
+
+  try {
+    const res = await fetch("/api/manual-execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entity, record_id: recordId, test_password: testPassword || null }),
+    });
+    const data = await res.json();
+    renderAttackResult(data, res.status);
+    await fetchSnapshot();
+  } catch (_) {
+    renderAttackResult({ detail: "Error de red al ejecutar la prueba manual." }, 500);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
+});
+
+// ================= EJECUCIÓN Y RENDERIZADO DEL RESULTADO =================
+
+function renderAttackResult(data, statusCode) {
+  const resultPanel = document.getElementById("attackResultPanel");
+  resultPanel.classList.remove("hidden");
+
+  if (statusCode >= 400 && !data.steps) {
+    resultPanel.innerHTML = `
+      <div class="result-banner alert">
+        <span><i class="bi bi-exclamation-octagon-fill"></i> No se pudo ejecutar la prueba (HTTP ${statusCode})</span>
+      </div>
+      <div class="explain-box">${escapeHtml(data.detail || "Error desconocido")}</div>
+    `;
+    return;
+  }
+
+  const stepsHtml = (data.steps || []).map((s) => `<li>${escapeHtml(s)}</li>`).join("");
+  const def = data.defense_mechanism || {};
+
+  resultPanel.innerHTML = `
+    <div class="result-banner ${data.blocked ? "blocked" : "alert"}">
+      <span>
+        <i class="bi ${data.blocked ? "bi-shield-fill-check" : "bi-shield-fill-x"}"></i>
+        ${data.blocked ? "ATAQUE NEUTRALIZADO POR LA APP" : "RESPUESTA INESPERADA"} · ${escapeHtml(data.title)}
+      </span>
+      <span class="badge ${data.blocked ? "badge-green" : "badge-red"}">
+        HTTP ${data.actual_status} · ${escapeHtml(data.target)}
+      </span>
+    </div>
+
+    <div class="result-grid">
+      <div>
+        <ul class="step-list">${stepsHtml}</ul>
+        <div class="defense-card">
+          <div class="defense-card-header">
+            <i class="bi bi-shield-check"></i>
+            <span>Mecanismo Defensor: ${escapeHtml(def.name || "Control Criptográfico")}</span>
+          </div>
+          <div class="defense-meta">
+            <span class="defense-pill">${escapeHtml(def.layer || "Seguridad")}</span>
+            <span class="defense-pill">${escapeHtml(def.where || "")}</span>
+          </div>
+          <p>${escapeHtml(def.how || data.explanation || "")}</p>
+        </div>
+      </div>
+
+      <div class="payload-stack">
+        <div>
+          <div class="code-label">Payload malicioso / parámetros enviados</div>
+          <pre class="json-box">${escapeHtml(JSON.stringify(data.request_payload, null, 2))}</pre>
+        </div>
+        <div>
+          <div class="code-label">Respuesta de rechazo del servidor (HTTP ${data.actual_status})</div>
+          <pre class="json-box">${escapeHtml(JSON.stringify(data.server_response, null, 2))}</pre>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+document.getElementById("runCustomAttackBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("runCustomAttackBtn");
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Atacando BD real...';
+
+  const payload = {
+    attack_type: document.getElementById("customAttackType").value,
+    user_id: document.getElementById("fieldUserId")?.value || null,
+    second_user_id: document.getElementById("fieldSecondUserId")?.value || null,
+    card_id: document.getElementById("fieldCardId")?.value || null,
+    ticket_id: document.getElementById("fieldTicketId")?.value || null,
+    order_id: document.getElementById("fieldOrderId")?.value || null,
+    tampered_amount_cents: document.getElementById("fieldTamperedAmount")
+      ? Number(document.getElementById("fieldTamperedAmount").value)
+      : null,
+    mode: document.getElementById("fieldMode")?.value || null,
+  };
+
+  try {
+    const res = await fetch("/api/custom-attack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    renderAttackResult(data, res.status);
+    await fetchSnapshot();
+  } catch (_) {
+    renderAttackResult({ detail: "Error de red al contactar el Inspector Web." }, 500);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+  }
+});
+
+async function runPresetAttack(attackId, btnEl) {
   const allBtns = document.querySelectorAll(".btn-attack");
   allBtns.forEach((b) => { b.disabled = true; });
   const origHtml = btnEl.innerHTML;
   btnEl.innerHTML = '<i class="bi bi-hourglass-split"></i> Ejecutando...';
 
-  const resultPanel = document.getElementById("attackResultPanel");
-  resultPanel.classList.remove("hidden");
-  resultPanel.innerHTML = '<div class="rec-sub"><i class="bi bi-arrow-repeat"></i> Simulando ataque contra los microservicios en ejecución...</div>';
-
   try {
     const res = await fetch(`/api/attacks/${attackId}`, { method: "POST" });
     const data = await res.json();
-
-    if (!res.ok) {
-      resultPanel.innerHTML = `
-        <div class="result-banner alert">
-          <span><i class="bi bi-exclamation-octagon-fill"></i> Error al ejecutar simulación (HTTP ${res.status})</span>
-        </div>
-        <div class="explain-box">${escapeHtml(data.detail || "Error desconocido")}</div>
-      `;
-    } else {
-      const stepsHtml = (data.steps || [])
-        .map((s) => `<li>${escapeHtml(s)}</li>`)
-        .join("");
-
-      resultPanel.innerHTML = `
-        <div class="result-banner ${data.blocked ? "blocked" : "alert"}">
-          <span>
-            <i class="bi ${data.blocked ? "bi-shield-fill-check" : "bi-shield-fill-x"}"></i>
-            ${data.blocked ? "ATAQUE NEUTRALIZADO POR DEFENSA" : "RESPUESTA INESPERADA"} · ${escapeHtml(data.title)}
-          </span>
-          <span class="badge ${data.blocked ? "badge-green" : "badge-red"}">
-            HTTP ${data.actual_status} · ${escapeHtml(data.target)}
-          </span>
-        </div>
-
-        <div class="result-grid">
-          <div>
-            <ul class="step-list">${stepsHtml}</ul>
-            <div class="explain-box">
-              <strong><i class="bi bi-mortarboard-fill"></i> Explicación técnica:</strong> ${escapeHtml(data.explanation)}
-            </div>
-          </div>
-
-          <div class="payload-stack">
-            <div>
-              <div class="code-label">Payload malicioso / de prueba enviado</div>
-              <pre class="json-box">${escapeHtml(JSON.stringify(data.request_payload, null, 2))}</pre>
-            </div>
-            <div>
-              <div class="code-label">Respuesta de rechazo del servidor (HTTP ${data.actual_status})</div>
-              <pre class="json-box">${escapeHtml(JSON.stringify(data.server_response, null, 2))}</pre>
-            </div>
-          </div>
-        </div>
-      `;
-      // Refrescar inmediatamente las BDs para ver el impacto real
-      await fetchSnapshot();
-    }
-  } catch (err) {
-    resultPanel.innerHTML = `
-      <div class="result-banner alert">
-        <span><i class="bi bi-wifi-off"></i> No se pudo contactar al servidor del Inspector</span>
-      </div>
-    `;
+    renderAttackResult(data, res.status);
+    await fetchSnapshot();
+  } catch (_) {
+    renderAttackResult({ detail: "No se pudo contactar al servidor del Inspector." }, 500);
   } finally {
     allBtns.forEach((b) => { b.disabled = false; });
     btnEl.innerHTML = origHtml;
@@ -154,7 +597,7 @@ async function runAttack(attackId, btnEl) {
 }
 
 document.querySelectorAll(".btn-attack").forEach((btn) => {
-  btn.addEventListener("click", () => runAttack(btn.dataset.attack, btn));
+  btn.addEventListener("click", () => runPresetAttack(btn.dataset.attack, btn));
 });
 
 // ================= MODALES INSPECTORES =================
@@ -252,7 +695,8 @@ async function triggerTamper(action) {
 }
 
 function render(data) {
-  lastKeysData = data.keys;
+  latestSnapshot = data;
+  renderCustomFields(false);
 
   const walletTotal = data.wallet.accounts.reduce((s, a) => s + (a.balance_cents || 0), 0);
   const bankTotal = data.bank.accounts.reduce((s, a) => s + (a.balance_cents || 0), 0);
@@ -276,7 +720,7 @@ function render(data) {
   if (!data.wallet.users.length) {
     usersEl.innerHTML = '<div class="empty-msg">Sin usuarios registrados aún.</div>';
   } else {
-    usersEl.innerHTML = data.wallet.users.map((u) => {
+    usersEl.innerHTML = data.wallet.users.slice(0, 5).map((u) => {
       const flash = checkChanged(`user:${u.id}`, u) ? "flash-new" : "";
       const isLocked = Boolean(u.locked_until);
       return `
@@ -301,7 +745,7 @@ function render(data) {
   if (!data.wallet.cards.length) {
     cardsEl.innerHTML = '<div class="empty-msg">Sin tarjetas agregadas.</div>';
   } else {
-    cardsEl.innerHTML = data.wallet.cards.map((c) => {
+    cardsEl.innerHTML = data.wallet.cards.slice(0, 5).map((c) => {
       const flash = checkChanged(`card:${c.id}`, c) ? "flash-new" : "";
       return `
         <div class="record-item ${flash}" data-card='${escapeHtml(JSON.stringify(c))}'>
@@ -341,7 +785,7 @@ function render(data) {
   if (!data.wallet.audit_log.length) {
     auditEl.innerHTML = '<div class="empty-msg">Sin eventos en bitácora.</div>';
   } else {
-    auditEl.innerHTML = data.wallet.audit_log.map((a) => {
+    auditEl.innerHTML = data.wallet.audit_log.slice(0, 8).map((a) => {
       const flash = checkChanged(`audit:${a.id}`, a) ? "flash-new" : "";
       return `
         <div class="record-item ${flash}" data-audit='${escapeHtml(JSON.stringify(a))}'>
@@ -363,7 +807,7 @@ function render(data) {
   if (!data.bank.accounts.length) {
     bankAccEl.innerHTML = '<div class="empty-msg">Sin cuentas bancarias vinculadas.</div>';
   } else {
-    bankAccEl.innerHTML = data.bank.accounts.map((acc) => {
+    bankAccEl.innerHTML = data.bank.accounts.slice(0, 5).map((acc) => {
       const flash = checkChanged(`bank_acc:${acc.id}`, acc) ? "flash-new" : "";
       return `
         <div class="record-item ${flash}">
@@ -382,7 +826,7 @@ function render(data) {
   if (!data.bank.oauth_codes.length) {
     oauthEl.innerHTML = '<div class="empty-msg">Aún no se ha ejecutado vinculación OAuth2 + PKCE.</div>';
   } else {
-    oauthEl.innerHTML = data.bank.oauth_codes.map((oc) => {
+    oauthEl.innerHTML = data.bank.oauth_codes.slice(0, 4).map((oc) => {
       const flash = checkChanged(`oauth:${oc.id}`, oc) ? "flash-new" : "";
       return `
         <div class="record-item ${flash}">
@@ -401,7 +845,7 @@ function render(data) {
   if (!data.bank.tickets.length) {
     ticketsEl.innerHTML = '<div class="empty-msg">Sin tickets adquiridos aún.</div>';
   } else {
-    ticketsEl.innerHTML = data.bank.tickets.map((t) => {
+    ticketsEl.innerHTML = data.bank.tickets.slice(0, 6).map((t) => {
       const flash = checkChanged(`tkt:${t.ticket_id}`, t) ? "flash-new" : "";
       const active = t.status === "active";
       return `
@@ -424,7 +868,7 @@ function render(data) {
   if (!data.store.orders.length) {
     ordersEl.innerHTML = '<div class="empty-msg">Sin órdenes creadas en la Tienda.</div>';
   } else {
-    ordersEl.innerHTML = data.store.orders.map((o) => {
+    ordersEl.innerHTML = data.store.orders.slice(0, 5).map((o) => {
       const flash = checkChanged(`ord:${o.order_id}`, o) ? "flash-new" : "";
       const paid = o.status === "paid";
       return `
@@ -447,7 +891,7 @@ function render(data) {
   if (!data.store.spent_tickets.length) {
     spentEl.innerHTML = '<div class="empty-msg">Ningún ticket canjeado en tienda aún.</div>';
   } else {
-    spentEl.innerHTML = data.store.spent_tickets.map((st) => {
+    spentEl.innerHTML = data.store.spent_tickets.slice(0, 5).map((st) => {
       const flash = checkChanged(`spent:${st.ticket_id}`, st) ? "flash-new" : "";
       return `
         <div class="record-item ${flash}">
